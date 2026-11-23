@@ -72,7 +72,8 @@ static inline int smc_read_known(io_connect_t conn, const char *key, uint32_t si
     return 0;
 }
 
-// 写入一个 SMC 键（data8 = 6）。需要 root，普通用户会被固件拒绝。成功返回 0。
+// 写入一个 SMC 键（data8 = 6）。需要 root，普通用户会被固件拒绝。
+// 成功返回 0；IOKit 调用失败返回 kern_return_t（如 0xE00002C1 没有权限）；固件拒绝返回 SMC 结果码（如 0x84 键不存在）。
 static inline int smc_write(io_connect_t conn, const char *key, uint32_t size, const uint8_t *bytes) {
     SMCKeyData in, out;
     memset(&in, 0, sizeof in); memset(&out, 0, sizeof out);
@@ -80,6 +81,7 @@ static inline int smc_write(io_connect_t conn, const char *key, uint32_t size, c
     in.keyInfo.dataSize = size;
     in.data8 = 6;
     memcpy(in.bytes, bytes, size > 32 ? 32 : size);
-    if (smc_call(conn, &in, &out) != KERN_SUCCESS || out.result != 0) return -1;
-    return 0;
+    kern_return_t r = smc_call(conn, &in, &out);
+    if (r != KERN_SUCCESS) return r;
+    return out.result;
 }

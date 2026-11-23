@@ -543,7 +543,7 @@ enum AppInfo {
     static let homepage = URL(string: "https://github.com/Buerxzhang/islet")!
     /// 官网（GitHub Pages）：功能介绍和可交互的演示。
     static let website = URL(string: "https://buerxzhang.github.io/islet/")!
-    /// 新建问题页（诊断报告先复制到剪贴板，不放进网址）。
+    /// 新建问题页（诊断报告会填进正文，同时复制到剪贴板）。
     static let issuesURL = URL(string: "https://github.com/Buerxzhang/islet/issues/new")!
     static var version: String {
         let info = Bundle.main.infoDictionary

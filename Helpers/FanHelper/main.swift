@@ -1,6 +1,10 @@
 import Foundation
 import IOKit
 import IOKit.pwr_mgt
+import os
+
+/// 日志按子系统归类，诊断报告用 `log show --predicate 'subsystem == "..."'` 取回。
+let helperLog = Logger(subsystem: FanControl.label, category: "fan")
 
 // islet 的风扇控制辅助程序：以 root 运行（launchd 守护进程），只做一件事——
 // 按菜单栏程序下发的配置（自动 / 固定 / 曲线 / 规则）调速，并在任何异常时把风扇交还系统。
@@ -68,6 +72,9 @@ final class FanController {
                 smoother.reset()
                 rules.reset()
                 recent.removeAll()
+            }
+            if sanitized.strategy != config.strategy {
+                helperLog.notice("切换策略：\(sanitized.strategy.label, privacy: .public)，依据：\(sanitized.basis.label, privacy: .public)")
             }
             config = sanitized
             status.strategy = sanitized.strategy
@@ -156,6 +163,9 @@ final class FanController {
             status.controlling = true
         } else {
             failures += 1
+            let failure = SMC.shared.lastWriteFailure.map { "\($0.key) \(SMC.describe($0.code))" } ?? "未知"
+            let mode = SMC.shared.raw("F0Md")
+            helperLog.error("写入失败（第 \(self.failures) 次）：目标 \(Int(rpm)) 转；失败的键 \(failure, privacy: .public)；F0Md \(mode.map { "\($0.type) \($0.bytes)" } ?? "不存在", privacy: .public)；Ftst \(SMC.shared.exists("Ftst") ? "存在" : "不存在", privacy: .public)")
             if failures >= 3 { restore(reason: "连续写入失败") }
         }
     }
@@ -205,7 +215,7 @@ final class FanController {
             SMC.shared.writeUInt8("F\(index)Md", 0)
         }
         if SMC.shared.value("Ftst") == 1 { SMC.shared.writeUInt8("Ftst", 0) }
-        if wasActive { NSLog("风扇已交还系统：%@", reason) }
+        if wasActive { helperLog.notice("风扇已交还系统：\(reason, privacy: .public)") }
     }
 
     /// 睡眠 / 退出时调用。
@@ -244,7 +254,7 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
         var buffer = [CChar](repeating: 0, count: Int(4 * MAXPATHLEN))
         guard proc_pidpath(connection.processIdentifier, &buffer, UInt32(buffer.count)) > 0,
               String(cString: buffer) == FanControl.clientPath else {
-            NSLog("拒绝连接：进程 %d 不是 islet", connection.processIdentifier)
+            helperLog.error("拒绝连接：进程 \(connection.processIdentifier) 不是 islet")
             return false
         }
         connection.setCodeSigningRequirement("identifier \"\(FanControl.clientIdentifier)\"")
@@ -299,6 +309,7 @@ if arguments.count >= 3, arguments[1] == "--dry-run" {
 }
 
 let controller = FanController(dryRun: false)
+helperLog.notice("辅助程序启动，协议版本 \(FanControl.version)")
 controller.start()
 watchSleep(controller)
 

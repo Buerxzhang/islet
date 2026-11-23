@@ -885,9 +885,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         panel.onQuit = { NSApp.terminate(nil) }
         panel.onDiagnostics = { [weak self] in
-            Diagnostics.copyReport()
-            self?.panel.footerNote = "已复制诊断信息"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self?.panel.footerNote = nil }
+            Diagnostics.copyReport {
+                self?.panel.footerNote = "已复制诊断信息"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self?.panel.footerNote = nil }
+            }
         }
         panel.onSelectStrategy = { [weak self] strategy in self?.selectStrategy(strategy) }
         panel.onFixedCommit = { [weak self] rpm in
@@ -992,9 +993,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         settingsModel.onUninstallFan = { [weak self] in self?.uninstallFanHelper() }
         setupFanEditors()
         settingsModel.onCopyDiagnostics = { [weak self] in
-            Diagnostics.copyReport()
-            self?.settingsModel.diagnosticsNote = "已复制"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self?.settingsModel.diagnosticsNote = nil }
+            Diagnostics.copyReport {
+                self?.settingsModel.diagnosticsNote = "已复制"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self?.settingsModel.diagnosticsNote = nil }
+            }
         }
     }
 

@@ -25,7 +25,8 @@ final class SMC {
         }
         switch type {
         case "flt ": return Double(Float(bitPattern: UInt32(bytes[0]) | UInt32(bytes[1]) << 8 | UInt32(bytes[2]) << 16 | UInt32(bytes[3]) << 24))
-        case "ui8 ": return Double(bytes[0])
+        case "ui8 ", "flag", "hex_": return Double(bytes[0])  // 新机型上开关类键可能是 flag / hex_
+        case "si8 ": return Double(Int8(bitPattern: bytes[0]))
         case "ui16": return Double(UInt16(bytes[0]) << 8 | UInt16(bytes[1]))
         case "ui32": return Double(UInt32(bytes[0]) << 24 | UInt32(bytes[1]) << 16 | UInt32(bytes[2]) << 8 | UInt32(bytes[3]))
         case "fpe2": return Double(UInt16(bytes[0]) << 8 | UInt16(bytes[1])) / 4
@@ -60,13 +61,44 @@ final class SMC {
         return write(key, [0, 8, 16, 24].map { UInt8((bits >> $0) & 0xff) })
     }
 
+    /// 最近一次写入失败：键名和错误码，给日志用。
+    private(set) var lastWriteFailure: (key: String, code: Int32)?
+
     private func write(_ key: String, _ data: [UInt8]) -> Bool {
-        guard connection != 0 else { return false }
-        return key.withCString { smc_write(connection, $0, UInt32(data.count), data) } == 0
+        guard connection != 0 else {
+            lastWriteFailure = (key, -1)
+            return false
+        }
+        let code = key.withCString { smc_write(connection, $0, UInt32(data.count), data) }
+        if code != 0 { lastWriteFailure = (key, code) }
+        return code == 0
     }
 
-    /// 键是否存在。
-    func exists(_ key: String) -> Bool { value(key) != nil }
+    /// 写入错误码的可读说明。
+    static func describe(_ code: Int32) -> String {
+        let hex = String(format: "0x%X", UInt32(bitPattern: code))
+        switch UInt32(bitPattern: code) {
+        case 0xFFFF_FFFF: return "SMC 未连接"
+        case 0x84: return "\(hex) 键不存在"
+        case 0xE000_02C1: return "\(hex) 没有权限"
+        case 0xE000_02E2: return "\(hex) 不允许"
+        case 0xE000_02C2: return "\(hex) 参数无效"
+        default: return hex
+        }
+    }
+
+    /// 键是否存在（类型不认识也算存在）。
+    func exists(_ key: String) -> Bool { raw(key) != nil }
+
+    /// 原始读取：类型码和字节，给诊断报告用（新机型键类型可能变了，先看原样）。
+    func raw(_ key: String) -> (type: String, bytes: [UInt8])? {
+        guard connection != 0 else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 32)
+        var rawType: UInt32 = 0
+        let length = key.withCString { smc_read(connection, $0, &buffer, &rawType) }
+        guard length >= 0 else { return nil }
+        return (Self.code(rawType), Array(buffer.prefix(min(Int(length), 32))))
+    }
 
     private static func code(_ type: UInt32) -> String {
         String(bytes: [24, 16, 8, 0].map { UInt8((type >> $0) & 0xff) }, encoding: .ascii) ?? ""

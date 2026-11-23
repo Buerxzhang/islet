@@ -815,7 +815,8 @@ struct PanelView: View {
             Text(model.footerNote ?? model.sampleMillis.map { "采样 \($0) ms" } ?? "")
                 .font(Typo.caption).foregroundStyle(model.footerNote == nil ? p.text3 : p.accentText)
             Spacer()
-            LinkButton(title: "诊断", muted: true, action: model.onDiagnostics)
+            LinkButton(title: "诊断", muted: true, action: model.onDiagnostics).help("复制诊断信息")
+            LinkButton(title: "反馈", muted: true, action: Diagnostics.openIssue).help("在 GitHub 新建问题，自动附上诊断信息")
             LinkButton(title: "退出", muted: true, action: model.onQuit)
         }
         .padding(.top, 2)

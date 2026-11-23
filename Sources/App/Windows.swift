@@ -1290,14 +1290,11 @@ struct SettingsView: View {
             }
         }
         section(p, "诊断") {
-            row(p, Diagnostics.summary(), "反馈时自动复制报告，粘贴即可", icon: "stethoscope", tint: Color(hex: 0xFF453A)) {
+            row(p, Diagnostics.summary(), "反馈时会自动附上报告", icon: "stethoscope", tint: Color(hex: 0xFF453A)) {
                 HStack(spacing: 8) {
                     PlainButton(title: model.diagnosticsNote ?? "复制报告", systemImage: "doc.on.doc",
                                 action: model.onCopyDiagnostics)
-                    PlainButton(title: "反馈问题", systemImage: "exclamationmark.bubble") {
-                        model.onCopyDiagnostics()
-                        NSWorkspace.shared.open(AppInfo.issuesURL)
-                    }
+                    PlainButton(title: "反馈问题", systemImage: "exclamationmark.bubble") { Diagnostics.openIssue() }
                 }
                 .fixedSize()
             }
