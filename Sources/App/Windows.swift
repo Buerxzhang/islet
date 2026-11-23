@@ -93,7 +93,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         case .music: return "waveform"
         case .metrics: return "gauge.with.dots.needle.33percent"
         case .fan: return "fan"
-        case .bluetooth: return "dot.radiowaves.left.and.right"
+        case .bluetooth: return BluetoothGlyph.name
         case .extensions: return "puzzlepiece.extension"
         case .general: return "gearshape"
         case .about: return "info.circle"
@@ -668,7 +668,7 @@ struct SettingsView: View {
         switch id {
         case "music": return ("音乐", nil, "waveform", Color(hex: 0xFF375F))
         case "metrics": return ("系统指标", nil, "gauge.with.dots.needle.33percent", Color(hex: 0x30D158))
-        case "bluetooth": return ("蓝牙电量", nil, "dot.radiowaves.left.and.right", Color(hex: 0x0A84FF))
+        case "bluetooth": return ("蓝牙电量", nil, BluetoothGlyph.name, Color(hex: 0x0A84FF))
         case "network": return ("网速", nil, "arrow.up.arrow.down", Color(hex: 0x0A84FF))
         default:
             let setting = SettingsModel.metricSetting(id)

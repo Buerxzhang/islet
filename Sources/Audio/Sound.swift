@@ -442,8 +442,8 @@ struct BluetoothPanelView: View {
         Themed { p in
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    Image(systemName: "dot.radiowaves.left.and.right").font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0x0A84FF)).frame(width: 20)   // 和设置里“蓝牙电量”同一个图标
+                    IconTile(symbol: BluetoothGlyph.name, tint: Color(hex: 0x0A84FF), size: 24)
+                        .frame(width: 20)   // 和设置里“蓝牙电量”同一个图标
                     Text("蓝牙电量").font(Typo.title).foregroundStyle(p.text)
                     Spacer()
                     // 关蓝牙会断开蓝牙键鼠，不放在这里；只在已关闭时给个打开的开关

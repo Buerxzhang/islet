@@ -480,7 +480,7 @@
   const btText = (d) => d.ears ? `<b>L${d.ears[0]} R${d.ears[1]}</b><small class="box">盒 ${d.box}%</small>` : `<b>${d.level == null ? "—" : d.level + "%"}</b>`;
   function btPanel() {
     const on = S.bt.filter((d) => d.on), off = S.bt.filter((d) => !d.on);
-    return header('<svg viewBox="0 0 24 24" fill="none" stroke="#0096d6" stroke-width="1.8" stroke-linecap="round"><path d="M5 7a10 10 0 0 0 0 10M8.5 9.5a5 5 0 0 0 0 5M19 7a10 10 0 0 1 0 10M15.5 9.5a5 5 0 0 1 0 5"/><circle cx="12" cy="12" r="1.2" fill="#0096d6"/></svg>', "蓝牙") +
+    return header('<svg viewBox="0 0 24 24" fill="none" stroke="#0096d6" stroke-width="1.8" stroke-linecap="round"><rect x="6.5" y="2.5" width="11" height="19" rx="5.5"/><path stroke-width="1.4" d="M9.1 9.8L14.9 14.2 12 16.6V7.4l2.9 2.4L9.1 14.2" stroke-linejoin="round"/></svg>', "蓝牙") +
       `<div class="pc"><div class="bt-top">${on.map((d) => `<div class="bt-dev" data-bt="${S.bt.indexOf(d)}" title="点击断开"><div class="big">${ringSVG(btLevel(d) ?? 0, 58, 5, btLevel(d) == null ? "transparent" : batteryColor(btLevel(d)), "var(--pn-inset)")}<div class="g">${svgIcon(d.icon)}</div></div><small>${d.name}</small>${btText(d)}</div>`).join("") || '<div class="empty-bt">没有已连接的设备</div>'}</div></div>` +
       (off.length ? `<div class="sec">其他设备</div><div class="pc">${off.map((d) => `<div class="bt-other"><span class="di">${svgIcon(d.icon)}</span><span>${d.name}</span><button data-bt="${S.bt.indexOf(d)}">连接</button></div>`).join('<div style="height:8px"></div>')}</div>` : "") +
       `<div class="pf"><span>点设备连接 / 断开</span><span><b data-act="btsys">蓝牙设置</b><b data-act="quit">退出</b></span></div>`;
@@ -575,7 +575,7 @@
     ["音乐", "#ff375f", '<path d="M5 10v4M9 7v10M13 4v16M17 8v8M21 11v2"/>'],
     ["系统指标", "#30d158", '<path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l3-4"/>'],
     ["风扇", "#30b0c7", '<circle cx="12" cy="12" r="1.5"/><path d="M12 10.5C11 6 12 3 15 3s3 4-3 7.5zM13.5 12c4.5-1 7.5 0 7.5 3s-4 3-7.5-3zM12 13.5c1 4.5 0 7.5-3 7.5s-3-4 3-7.5zM10.5 12C6 13 3 12 3 9s4-3 7.5 3z"/>'],
-    ["蓝牙电量", "#0a84ff", '<path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9 9 0 0 0 0 13M18.5 5.5a9 9 0 0 1 0 13"/><circle cx="12" cy="12" r="1.3"/>'],
+    ["蓝牙电量", "#0a84ff", '<rect x="6.5" y="2.5" width="11" height="19" rx="5.5"/><path stroke-width="1.4" d="M9.1 9.8L14.9 14.2 12 16.6V7.4l2.9 2.4L9.1 14.2"/>'],
     ["扩展功能", "#bf5af2", '<path d="M10 4h4v3a2 2 0 1 0 0 0h3v4h-1a2 2 0 1 0 0 4h1v4h-4v-1a2 2 0 1 0-4 0v1H6v-4h1a2 2 0 1 0 0-4H6V7h4z" fill="#fff" stroke="none"/>'],
     ["通用", "#8e8e93", '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'],
     ["关于", "#ff9f0a", '<circle cx="12" cy="12" r="8"/><path d="M12 11v5M12 8h.01"/>']];
@@ -600,7 +600,7 @@
     ["temp", "温度", "#ff9f0a", '<path d="M14 14.8V4a2 2 0 0 0-4 0v10.8a4 4 0 1 0 4 0z"/>'],
     ["fan", "风扇", "#30b0c7", '<circle cx="12" cy="12" r="1.5"/><path d="M12 10.5C11 6 12 3 15 3s3 4-3 7.5zM13.5 12c4.5-1 7.5 0 7.5 3s-4 3-7.5-3zM12 13.5c1 4.5 0 7.5-3 7.5s-3-4 3-7.5zM10.5 12C6 13 3 12 3 9s4-3 7.5 3z"/>'],
     ["net", "网速", "#0a84ff", '<path d="M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4"/>'],
-    ["bt", "蓝牙电量", "#0a84ff", '<path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.5 5.5a9 9 0 0 0 0 13M18.5 5.5a9 9 0 0 1 0 13"/><circle cx="12" cy="12" r="1.3"/>']];
+    ["bt", "蓝牙电量", "#0a84ff", '<rect x="6.5" y="2.5" width="11" height="19" rx="5.5"/><path stroke-width="1.4" d="M9.1 9.8L14.9 14.2 12 16.6V7.4l2.9 2.4L9.1 14.2"/>']];
   const itemInfo = Object.fromEntries(ITEMS.map(([id, name, color, path]) => [id, { name, color, path }]));
   const DEFAULT_SET = JSON.parse(JSON.stringify({ ...SET, hidden: [...SET.hidden] }));
 
@@ -728,10 +728,10 @@
   }
   let checking = false;
   function aboutPage() {
-    return `<div class="about"><img src="icon-b1a28c54b977.png" alt=""><div><div><b>islet</b> <small>v1.4.2 (81)</small></div><div class="sub">菜单栏里的灵动岛</div></div></div>` +
+    return `<div class="about"><img src="icon-b1a28c54b977.png" alt=""><div><div><b>islet</b> <small>v1.4.3 (82)</small></div><div class="sub">菜单栏里的灵动岛</div></div></div>` +
       section("项目", row("Buerxzhang / islet", "GitHub 开源项目", `<span class="btns"><a class="pbtn" href="./">官网</a><a class="pbtn" href="https://github.com/Buerxzhang/islet" target="_blank" rel="noopener">GitHub</a><a class="pbtn" href="https://github.com/Buerxzhang/islet" target="_blank" rel="noopener">★ Star</a></span>`, tile("#1d1d1f", '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/>'))) +
       section("更新", join(
-        row(checking ? "软件更新" : "已是最新版本", checking ? "正在查询 GitHub…" : "当前是 1.4.2", btn(checking ? "检查中…" : "检查更新", 'data-check="1"'), tile("#0a84ff", '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4"/>')),
+        row(checking ? "软件更新" : "已是最新版本", checking ? "正在查询 GitHub…" : "", btn(checking ? "检查中…" : "检查更新", 'data-check="1"'), tile("#0a84ff", '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4"/>')),
         row("自动检查更新", "", tg("autoUpdate"), tile("#ff9f0a", '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4" fill="#fff" stroke="none"/>')))) +
       section("诊断", row("自检通过，一切正常", "反馈时自动复制报告，粘贴即可", `<span class="btns">${btn("复制报告", 'data-copy="1"')}<a class="pbtn" href="https://github.com/Buerxzhang/islet/issues/new" target="_blank" rel="noopener">反馈问题</a></span>`, tile("#ff453a", '<path d="M6 4v5a4 4 0 0 0 8 0V4M10 13v2a5 5 0 0 0 10 0v-2"/><circle cx="20" cy="11" r="1.6"/>')));
   }
@@ -748,7 +748,7 @@
   const pageNotes = (page) => (NOTES[page] ? `<div class="pnotes">${NOTES[page].map(([t, x]) => `<p><b>「${t}」</b>${x}</p>`).join("")}</div>` : "");
   function renderSettings() {
     win.querySelector(".side").innerHTML = PAGES.map(([name, color, path], i) => (PAGE_SEP.has(i) ? '<div class="sep"></div>' : "") +
-      `<div class="nav${SET.page === name ? " sel" : ""}" data-page="${name}">${tile(color, path, 24)}<span>${name}</span>${name === "关于" ? "<small>v1.4.2</small>" : ""}</div>`).join("");
+      `<div class="nav${SET.page === name ? " sel" : ""}" data-page="${name}">${tile(color, path, 24)}<span>${name}</span>${name === "关于" ? "<small>v1.4.3</small>" : ""}</div>`).join("");
     const content = win.querySelector(".content"), scroll = content.scrollTop;
     content.innerHTML = `<h3>${SET.page}</h3>` + { 灵动岛: islandPage, 扩展功能: extPage, 通用: generalPage, 关于: aboutPage, ...pageFns }[SET.page]() + pageNotes(SET.page);
     content.scrollTop = scroll;
@@ -805,7 +805,7 @@
       return;
     }
     if (e.target.closest("[data-copy]")) {
-      const report = "islet 1.4.2 (81) · 诊断报告（示例）\n机型：Mac（示例）\n系统：macOS 15\n传感器：8 个\n风扇：自动";
+      const report = "islet 1.4.3 (82) · 诊断报告（示例）\n机型：Mac（示例）\n系统：macOS 15\n传感器：8 个\n风扇：自动";
       navigator.clipboard?.writeText(report).catch(() => {});
       showToast("已复制诊断报告（示例），到 GitHub 粘贴即可");
       return;
@@ -1064,7 +1064,7 @@
     const check = (on) => `<i>${on ? "✓" : ""}</i>`;
     const item = (m, label, { on = false, off = false, id = "", kbd = "" } = {}) =>
       `<div class="${off ? "dis" : ""}" ${off ? "" : `data-m="${m}"`} ${id ? `data-id="${id}"` : ""}>${check(on)}${label}${kbd ? `<kbd>${kbd}</kbd>` : ""}</div>`;
-    let html = `<div class="dis"><i></i>islet 1.4.2</div><hr>`;
+    let html = `<div class="dis"><i></i>islet 1.4.3</div><hr>`;
     if (at && shown.includes(at)) {
       const name = nameOf(at);
       html += item("vis", isModule(at) ? `隐藏${name}模块` : /^[A-Za-z]/.test(name) ? `隐藏 ${name} 指标` : `隐藏${name}指标`, { off: lastOne, id: at });

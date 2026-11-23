@@ -419,8 +419,38 @@ struct IconTile: View {
 
     /// 和面板标题一样：只画彩色图标，不带底块
     var body: some View {
-        Image(systemName: symbol).font(.system(size: size * 0.6, weight: .semibold)).foregroundStyle(tint)
-            .frame(width: size, height: size)
+        Group {
+            if symbol == BluetoothGlyph.name {
+                // 竖胶囊里放符文：呼应“灵动岛”的胶囊
+                let line = StrokeStyle(lineWidth: size * 0.07, lineCap: .round, lineJoin: .round)
+                ZStack {
+                    Capsule().stroke(tint, style: line).frame(width: size * 0.46, height: size * 0.66)
+                    // 符文比外框细一些，在小尺寸下不糊成一团
+                    BluetoothGlyph().stroke(tint, style: StrokeStyle(lineWidth: size * 0.05, lineCap: .round, lineJoin: .round))
+                        .frame(width: size * 0.4, height: size * 0.4)
+                }
+            } else {
+                Image(systemName: symbol).font(.system(size: size * 0.6, weight: .semibold)).foregroundStyle(tint)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+/// 蓝牙标志：SF Symbols 没有公开蓝牙图标，自己画（IconTile 里用 symbol: "bluetooth"）。
+struct BluetoothGlyph: Shape {
+    static let name = "bluetooth"
+
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height) }
+        var path = Path()
+        path.move(to: point(0.25, 0.31))
+        path.addLine(to: point(0.75, 0.69))
+        path.addLine(to: point(0.5, 0.9))
+        path.addLine(to: point(0.5, 0.1))
+        path.addLine(to: point(0.75, 0.31))
+        path.addLine(to: point(0.25, 0.69))
+        return path
     }
 }
 
