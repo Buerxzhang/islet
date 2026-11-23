@@ -47,7 +47,8 @@ defaults write $domain updateFeedURL http://localhost:8765/release.json
 defaults delete $domain lastUpdateCheck 2>/dev/null || true
 defaults delete $domain notifiedUpdateVersion 2>/dev/null || true
 defaults delete $domain skippedUpdateVersion 2>/dev/null || true
-trap 'cp "$dir/Info.plist.bak" $plist; defaults delete $domain updateFeedURL 2>/dev/null; echo "\n已恢复为查 GitHub"' EXIT INT
+# 版本号在第 1 步已经改回，这里只恢复查 GitHub（再还原 Info.plist 会覆盖测试期间改过的版本号）
+trap 'defaults delete $domain updateFeedURL 2>/dev/null; echo "\n已恢复为查 GitHub"' EXIT INT
 
 # 重新启动一次，让 islet 读到新地址（启动 30 秒后自动检查并弹窗）
 pkill -x islet 2>/dev/null && sleep 0.5; open /Applications/islet.app
