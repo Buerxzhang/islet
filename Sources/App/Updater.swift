@@ -1,7 +1,7 @@
 import AppKit
 import CryptoKit
 
-/// 应用内更新：在设置“关于”页里显示说明和进度 → 下载 Release 里的 islet.zip → 核对 SHA-256、包标识、版本和签名
+/// 应用内更新：在更新弹窗（UpdateDialog）里显示说明和进度 → 下载 Release 里的 islet.zip → 核对 SHA-256、包标识、版本和签名
 /// → 退出后替换「应用程序」里的 islet 并重新打开。任何一步失败都不动现有程序，可改为打开下载页。
 final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
     static let shared = Updater()
@@ -29,6 +29,20 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
             if line.hasPrefix("- ") { line = "• " + line.dropFirst(2) }
             return line.trimmingCharacters(in: .whitespaces)
         }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 更新说明分组：「改进」「调整」这类小标题下面跟着若干条，弹窗里按组列出。
+    static func noteSections(_ markdown: String) -> [(title: String, items: [String])] {
+        var sections: [(title: String, items: [String])] = []
+        for line in plainNotes(markdown).split(separator: "\n").map(String.init) where !line.isEmpty {
+            if line.hasPrefix("• ") {
+                if sections.isEmpty { sections.append(("", [])) }
+                sections[sections.count - 1].items.append(String(line.dropFirst(2)))
+            } else {
+                sections.append((line, []))
+            }
+        }
+        return sections.filter { !$0.items.isEmpty || !$0.title.isEmpty }
     }
 
     // MARK: 下载

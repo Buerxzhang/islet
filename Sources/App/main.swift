@@ -534,8 +534,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // 检查更新：启动 30 秒后一次，之后每 6 小时看一眼（距上次检查不满一天会跳过）
         UpdateChecker.onFound = { [weak self] release in
             self?.settingsModel.update = .available(release)
-            self?.openSettings(page: .about)
+            // 同一个版本只主动弹一次，之后只在设置的“关于”页显示
+            guard UserDefaults.standard.string(forKey: "notifiedUpdateVersion") != release.version else { return }
+            UserDefaults.standard.set(release.version, forKey: "notifiedUpdateVersion")
+            UpdateWindow.shared.show(release)
         }
+        UpdateWindow.shared.onSkip = { [weak self] in self?.settingsModel.update = .idle }
         DispatchQueue.main.asyncAfter(deadline: .now() + 30) { UpdateChecker.checkInBackground() }
         Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in UpdateChecker.checkInBackground() }
         if UserDefaults.standard.bool(forKey: "keepAwakeOnLaunch") { KeepAwake.shared.set(.always) }
@@ -820,6 +824,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             } else {
                 view = AnyView(SpectrumPanelView(model: model))
             }
+        case "update":
+            // --render update out.png [downloading|ready|failed]：更新弹窗的各个状态
+            let notes = "## 改进\n\n- 设置页统一样式：每行都有彩色图标和分隔线，右侧控件同宽对齐。\n- 「显示位置」改为悬浮 / 菜单栏二选一。\n- 悬浮时，点开的面板不再被其他应用的窗口挡住。\n\n## 调整\n\n- 平滑滚动不再检测其他平滑滚动工具。"
+            let release = UpdateChecker.Release(version: "9.9.9", url: AppInfo.homepage, notes: notes, download: AppInfo.homepage,
+                                                size: 8_600_000, date: Date())
+            let args = CommandLine.arguments
+            let phase: Updater.Phase = args.contains("downloading") ? .downloading(0.42, "3.4 / 8.2 MB")
+                : args.contains("ready") ? .ready(app: AppInfo.homepage, folder: AppInfo.homepage)
+                : args.contains("failed") ? .failed("下载失败：网络连接已中断") : .idle
+            view = AnyView(UpdateDialog(release: release, phase: phase))
         case "rules":
             let fan = Fan.readAll().first.map { FanData(current: $0.current, minimum: $0.minimum, maximum: $0.maximum) }
             view = AnyView(RulesView(fan: fan, flat: true))

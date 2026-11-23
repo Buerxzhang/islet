@@ -460,10 +460,12 @@ enum UpdateChecker {
         var notes = ""        // 更新说明（Markdown）
         var download: URL?    // islet.zip
         var digest: String?   // islet.zip 的 SHA-256（十六进制）
+        var size: Int64?      // islet.zip 的字节数
+        var date: Date?       // 发布时间
     }
     enum State: Equatable { case idle, checking, latest, available(Release), failed }
 
-    /// 自动检查（每天最多一次，有新版本时打开设置的“关于”页，选过“跳过这个版本”的不再打开）。
+    /// 自动检查（每天最多一次，有新版本时弹出更新窗口，同一版本只弹一次，选过“跳过这个版本”的不再弹）。
     static var autoCheck: Bool { UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true }
     static var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
 
@@ -477,9 +479,16 @@ enum UpdateChecker {
         return false
     }
 
+    /// 本地测试更新流程：`defaults write local.codex.islet updateFeedURL http://localhost:8765/release.json`
+    /// 指向一个和 GitHub 接口同格式的 JSON（见 test-update.sh），删掉这个键就恢复查 GitHub。
+    static var feedURL: URL {
+        UserDefaults.standard.string(forKey: "updateFeedURL").flatMap(URL.init(string:))
+            ?? URL(string: "https://api.github.com/repos/Buerxzhang/islet/releases/latest")!
+    }
+
     /// 查询最新版本：成功时回调最新的 Release（可能不比当前新），失败时回调 nil。
     static func fetchLatest(_ completion: @escaping (Release?) -> Void) {
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/Buerxzhang/islet/releases/latest")!)
+        var request = URLRequest(url: feedURL)
         request.timeoutInterval = 8
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         URLSession.shared.dataTask(with: request) { data, response, _ in
@@ -491,13 +500,15 @@ enum UpdateChecker {
                 release = Release(version: tag.hasPrefix("v") ? String(tag.dropFirst()) : tag, url: page,
                                   notes: object["body"] as? String ?? "",
                                   download: (zip?["browser_download_url"] as? String).flatMap(URL.init(string:)),
-                                  digest: (zip?["digest"] as? String).flatMap { $0.hasPrefix("sha256:") ? String($0.dropFirst(7)) : nil })
+                                  digest: (zip?["digest"] as? String).flatMap { $0.hasPrefix("sha256:") ? String($0.dropFirst(7)) : nil },
+                                  size: (zip?["size"] as? NSNumber)?.int64Value,
+                                  date: (object["published_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) })
             }
             DispatchQueue.main.async { completion(release) }
         }.resume()
     }
 
-    /// 自动检查发现新版本时调用（打开设置的“关于”页）。
+    /// 自动检查发现新版本时调用（弹出更新窗口）。
     static var onFound: ((Release) -> Void)?
 
     /// 手动检查（关于页的按钮）。

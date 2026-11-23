@@ -1204,61 +1204,26 @@ struct SettingsView: View {
 
     private var updateTitle: String {
         switch model.update {
-        case .available(let release): return "发现新版本 \(release.version)"
+        case .available(let release): return "有新版本 \(release.version)"
         case .latest: return "已是最新版本"
         default: return "软件更新"
         }
     }
 
-    private var updateSubtitle: String {
+    private var updateSubtitle: String? {
         switch model.update {
         case .checking: return "正在查询 GitHub…"
         case .failed: return "检查失败，请检查网络后再试"
-        case .available: return "当前是 \(UpdateChecker.currentVersion)"
-        case .latest: return "当前是 \(UpdateChecker.currentVersion)"
+        case .available(let release):
+            switch updater.phase {
+            case .downloading(let fraction, _): return "正在下载 \(Int(fraction * 100))%"
+            case .ready: return "已下载好，重启后生效"
+            case .failed: return "更新失败，点“查看”重试"
+            case .idle: return release.summary.isEmpty ? nil : release.summary
+            }
+        case .latest: return nil
         case .idle: return "从 GitHub 查询是否有新版本"
         }
-    }
-
-    /// 新版本的说明、下载进度或出错原因，排在“发现新版本”下面。
-    private func updateDetail(_ p: Palette, _ release: UpdateChecker.Release) -> some View {
-        let notes = Updater.plainNotes(release.notes)
-        return VStack(alignment: .leading, spacing: 10) {
-            if !notes.isEmpty {
-                Text(notes).font(Typo.settingsBody).foregroundStyle(p.text2).lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(p.text.opacity(0.04)))
-            }
-            switch updater.phase {
-            case .downloading(let fraction, let text):
-                HStack(spacing: 10) {
-                    ProgressView(value: fraction).progressViewStyle(.linear)
-                    Text(text.isEmpty ? "正在下载…" : text).font(Typo.settingsCaption).foregroundStyle(p.text3).monospacedDigit()
-                }
-            case .failed(let message):
-                HStack(spacing: 10) {
-                    Text("更新失败：\(message)").font(Typo.settingsCaption).foregroundStyle(Color(hex: 0xFF453A))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    LinkButton(title: "打开下载页") { NSWorkspace.shared.open(release.url) }
-                }
-            case .ready:
-                EmptyView()
-            case .idle:
-                HStack {
-                    Spacer(minLength: 8)
-                    LinkButton(title: "跳过这个版本", muted: true) {
-                        UserDefaults.standard.set(release.version, forKey: "skippedUpdateVersion")
-                        model.update = .idle
-                    }
-                }
-            }
-        }
-        .padding(.leading, 42)
-        .padding(.top, 2)
-        .padding(.bottom, 8)
     }
 
     @ViewBuilder private func aboutPage(_ p: Palette) -> some View {
@@ -1303,28 +1268,22 @@ struct SettingsView: View {
         }
         .onAppear {
             if !flat { AppInfo.fetchStars { model.stars = $0 } }
-            // 已知有新版本时悄悄再查一次：发版后改过说明或又发了新版，这里显示的是最新的
-            if case .available = model.update, updater.phase == .idle {
+            // 打开关于页时悄悄查一次：重启后内存里没有新版本信息（自动检查一天才一次）；发版后改过说明或又发了新版也能跟上
+            if model.update != .checking, updater.phase == .idle {
                 UpdateChecker.check { state in if state != .checking, state != .failed { model.update = state } }
             }
         }
         section(p, "更新") {
             row(p, updateTitle, updateSubtitle, icon: "arrow.triangle.2.circlepath", tint: Color(hex: 0x0A84FF)) {
                 if case .available(let release) = model.update {
-                    switch updater.phase {
-                    case .downloading: PlainButton(title: "取消") { updater.cancel() }
-                    case .ready: PlainButton(title: "重启以完成更新", prominent: true) { updater.relaunch() }
-                    case .failed: PlainButton(title: "重新下载", prominent: true) { updater.start(release) }
-                    case .idle: PlainButton(title: release.download == nil ? "打开下载页" : "下载更新", prominent: true) { updater.start(release) }
-                    }
+                    PlainButton(title: "查看", prominent: true) { UpdateWindow.shared.show(release) }
                 } else {
-                    PlainButton(title: model.update == .checking ? "检查中…" : "检查更新") {
+                    PlainButton(title: model.update == .checking ? "检查中…" : model.update == .failed ? "重试" : "检查更新") {
                         UpdateChecker.check { model.update = $0 }
                     }
                     .disabled(model.update == .checking)
                 }
             }
-            if case .available(let release) = model.update { updateDetail(p, release) }
             divider(p)
             row(p, "自动检查更新", nil, icon: "bell.badge", tint: Color(hex: 0xFF9F0A)) {
                 toggle("autoCheckUpdates", default: true)
