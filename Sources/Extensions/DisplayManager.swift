@@ -82,8 +82,14 @@ final class DisplayManager: ObservableObject {
                 result.append(mode)
             }
             // 有实用的 HiDPI 档位（比原生一半大的）时不列原生普通档位：字太小、也不如 HiDPI 清晰，
-            // 切过去还会黑屏重连。想用原生就关掉 islet 的 HiDPI（正在用时照常列出）
-            if result.contains(where: { $0.hiDPI && $0.width > native.width / 2 + 8 }) {
+            // 切过去还会黑屏重连。想用原生就关掉 islet 的 HiDPI（正在用时照常列出）。
+            // 但原生的字大小本来就最合适时（如 24 寸 1080P，见 recommended）照常列出：它就是推荐的大小，不能选了别的就回不去
+            let practical = result.filter { $0.hiDPI && $0.width > native.width / 2 + 8 }
+            let nativeFits = widthMM > 0 && practical.allSatisfy {
+                let target = widthMM / 25.4 * 90
+                return abs(Double(native.width) - target) <= abs(Double($0.width) - target)
+            }
+            if !practical.isEmpty, !nativeFits {
                 result.removeAll { $0.native && !$0.hiDPI && $0.group != current.group }
             }
             return result
@@ -148,6 +154,9 @@ final class DisplayManager: ObservableObject {
     /// 各块屏的覆盖配置状态（来自辅助程序）。
     @Published private(set) var overrides: [CGDirectDisplayID: OverrideStatus] = [:]
     @Published private(set) var busy = false
+    /// 开关 HiDPI 后没能用软件重连、要手动插拔的屏（值为 true = 刚开启，false = 刚关闭）。
+    /// 重连前系统里的档位还是旧的：刚关闭的屏还留着那几档 HiDPI，看起来像系统自带的，开关要照常显示为关
+    @Published private(set) var awaitingReconnect: [CGDirectDisplayID: Bool] = [:]
     @Published private(set) var message: String?
 
     struct OverrideStatus: Decodable {
@@ -245,6 +254,9 @@ final class DisplayManager: ObservableObject {
                            isMain: CGDisplayIsMain(id) != 0, mirrored: CGDisplayIsInMirrorSet(id) != 0,
                            active: CGDisplayIsActive(id) != 0, widthMM: Double(CGDisplayScreenSize(id).width))
         }.sorted { $0.isMain != $1.isMain ? $0.isMain : $0.id < $1.id }
+        // 重连后档位变了（开启的出现了、关闭的消失了），或屏幕拔掉了，就不再等
+        let pending = awaitingReconnect.filter { id, adding in displays.contains { $0.id == id && $0.hasHiDPIChoices != adding } }
+        if pending != awaitingReconnect { awaitingReconnect = pending }
         refreshOverrides()
     }
 
@@ -277,7 +289,7 @@ final class DisplayManager: ObservableObject {
 
     // MARK: 添加 / 移除 HiDPI 档位
 
-    /// 添加后需要重新连接这块屏，新档位才会出现：有另一块屏在用时自动用软件重连，否则提示手动插拔。
+    /// 添加后需要重新连接这块屏，新档位才会出现：用软件断开再接上（只有一块屏时也行），接不回来才提示手动插拔。
     /// 新档位出现后自动切到推荐的大小。
     func addHiDPI(_ display: Display) {
         pendingRecommend = display.id
@@ -323,8 +335,10 @@ final class DisplayManager: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.busy = false
-                // 成功不提示（开关状态已经说明了），只留失败或需要手动插拔的说明
-                self.message = code == 0 || text.isEmpty ? nil : text
+                // 配置写好了但没能重连：在这块屏的说明里提示手动插拔，不再显示助手的原话
+                self.awaitingReconnect[display.id] = succeeded && code != 0 ? command == ["install"] : nil
+                // 成功不提示（开关状态已经说明了），只留失败的说明
+                self.message = succeeded || text.isEmpty ? nil : text
                 self.refresh()
                 if succeeded { self.applyRecommendation(attempts: 6) } else { self.pendingRecommend = nil }
             }

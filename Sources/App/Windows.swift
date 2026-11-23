@@ -445,9 +445,8 @@ struct SettingsView: View {
         section(p, "重置") {
             row(p, "恢复默认设置", nil, icon: "arrow.uturn.backward.circle.fill", tint: Color(hex: 0x8E8E93)) {
                 PlainButton(title: "恢复默认") {
-                    guard confirmAlert("恢复 islet 的默认设置？",
-                                       "islet 会重新启动。流量统计、macOS 的显示器配置和系统权限会保留。") else { return }
-                    model.onResetAll()
+                    confirmAlert("恢复 islet 的默认设置？",
+                                 "islet 会重新启动。流量统计、macOS 的显示器配置和系统权限会保留。") { model.onResetAll() }
                 }
             }
         }
@@ -587,9 +586,8 @@ struct SettingsView: View {
                 }
             }
             LinkButton(title: "恢复默认显示和顺序", muted: true) {
-                guard confirmAlert("恢复岛上项目的默认显示？",
-                                   "显示哪些项目和它们的顺序会按本机重新设置，其他设置不变。") else { return }
-                model.resetIslandItems()
+                confirmAlert("恢复岛上项目的默认显示？",
+                             "显示哪些项目和它们的顺序会按本机重新设置，其他设置不变。") { model.resetIslandItems() }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 2)
@@ -834,9 +832,10 @@ struct SettingsView: View {
             divider(p)
             detailRow(p, "清零流量统计", icon: "arrow.counterclockwise", tint: Color(hex: 0x8E8E93)) {
                 PlainButton(title: "清零") {
-                    guard confirmAlert("清零流量统计？", "今日和本月的上传、下载记录会归零。") else { return }
-                    TrafficLedger.shared.reset()
-                    model.refresh()
+                    confirmAlert("清零流量统计？", "今日和本月的上传、下载记录会归零。") {
+                        TrafficLedger.shared.reset()
+                        model.refresh()
+                    }
                 }
             }
         }
@@ -999,13 +998,18 @@ struct SettingsView: View {
         }
     }
 
-    private func confirmAlert(_ title: String, _ message: String) -> Bool {
+    /// 确认框挂在设置窗口上（从窗口顶部滑出），一看就知道是这里发起的；点了“确定”才执行 action。
+    private func confirmAlert(_ title: String, _ message: String, then action: @escaping () -> Void) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "确定")
         alert.addButton(withTitle: "取消")
-        return alert.runModal() == .alertFirstButtonReturn
+        guard let window = NSApp.keyWindow else {
+            if alert.runModal() == .alertFirstButtonReturn { action() }
+            return
+        }
+        alert.beginSheetModal(for: window) { if $0 == .alertFirstButtonReturn { action() } }
     }
 
     private static func setting(for metric: Metric) -> SpeedSetting? {
@@ -1093,7 +1097,14 @@ struct SettingsView: View {
     private func hiDPISwitch(_ display: DisplayManager.Display) -> HiDPISwitch {
         guard display.canSwitch, let status = displays.overrides[display.id], status.external else { return .none }
         if status.owned { return .on }
-        if !status.installed, !display.hasHiDPIChoices, !status.sizes.isEmpty { return .off }
+        if !status.installed, displays.awaitingReconnect[display.id] == false { return .off }
+        // 要加的档位里至少有一档会被列出来（字不比推荐大太多，规则同 Display.choices），开了才有意义：
+        // 27 寸及更大的 1080P 屏原生的字已经偏大，能加的档位字更大，全被滤掉，就不给开关
+        let target = display.widthMM / 25.4 * 90
+        let useful = status.sizes.contains { size in
+            display.widthMM <= 0 || Double(size.split(separator: "×").first ?? "").map { $0 >= target * 0.7 } == true
+        }
+        if !status.installed, !display.hasHiDPIChoices, useful { return .off }
         return .none
     }
 
@@ -1101,7 +1112,8 @@ struct SettingsView: View {
         let current = display.current
         let hiDPI = hiDPISwitch(display)
         let options = display.sizeOptions
-        let showSizes = display.canSwitch && options.count > 1
+        // 刚关掉 HiDPI、还没插拔：剩下的 HiDPI 档位只是残留，不给选
+        let showSizes = display.canSwitch && options.count > 1 && displays.awaitingReconnect[display.id] != false
         let subtitle: String
         if !display.active {
             subtitle = "未启用"
@@ -1110,6 +1122,8 @@ struct SettingsView: View {
             let details = [mode, current.rate].filter { !$0.isEmpty }.joined(separator: " · ")
             // 第二行：镜像时说明为什么不能调；没开 HiDPI 时说明开关的作用；用 HiDPI 时给出实际渲染尺寸（普通模式等于分辨率，不重复）
             let note = display.mirrored ? "镜像中，解除镜像后可以单独调整"
+                : displays.awaitingReconnect[display.id] == true ? "已开启 HiDPI，请重新插拔一次这块屏的视频线，新的大小才会出现"
+                : displays.awaitingReconnect[display.id] == false ? "已关闭 HiDPI，重新插拔一次这块屏的视频线后完全生效"
                 : hiDPI == .off ? "开启 HiDPI 后文字更清晰，大小可调"
                 : current.hiDPI ? renderNote(current, display)
                 : !current.native ? "普通分辨率，放大显示会发虚" : nil
@@ -1153,13 +1167,11 @@ struct SettingsView: View {
 
     private func setHiDPI(_ on: Bool, on display: DisplayManager.Display) {
         if on {
-            guard confirmAlert("为 \(display.name) 开启 HiDPI？",
-                               "需要输入管理员密码，为这块屏写一份显示配置，补上系统没有的 HiDPI 档位（只写入或删除 islet 自己的配置）。开启后屏幕会断开再接上一次，然后切到推荐的大小。随时可以关掉。") else { return }
-            displays.addHiDPI(display)
+            confirmAlert("为 \(display.name) 开启 HiDPI？",
+                         "需要输入管理员密码，为这块屏写一份显示配置，补上系统没有的 HiDPI 档位（只写入或删除 islet 自己的配置）。开启后屏幕会断开再接上一次，然后切到推荐的大小。随时可以关掉。") { displays.addHiDPI(display) }
         } else {
-            guard confirmAlert("关闭 \(display.name) 的 HiDPI？",
-                               "需要输入管理员密码。关闭后这块屏会断开再接上一次，回到系统自带的分辨率。") else { return }
-            displays.removeHiDPI(display)
+            confirmAlert("关闭 \(display.name) 的 HiDPI？",
+                         "需要输入管理员密码。关闭后这块屏会断开再接上一次，回到系统自带的分辨率。") { displays.removeHiDPI(display) }
         }
     }
 

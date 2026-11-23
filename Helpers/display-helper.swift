@@ -165,14 +165,11 @@ case "install":
     guard CGDisplayIsBuiltin(id) == 0 else { fail("内建屏幕已经有系统提供的缩放档位") }
     let path = overridePath(id)
     guard let native = nativeSize(id) else { fail("读不到这块屏的原生分辨率") }
-    // 系统已经给了实用的 HiDPI 档位（4K 屏等）：不重复添加。
-    // 只算比原生一半更大的档位——2K、带鱼屏通常只有“原生的一半”这一档 HiDPI，东西大得没法用，仍然需要添加
-    // islet 自己以前写的配置直接换成新档位（这时系统里的 HiDPI 档位就是它带来的，不算）；别的工具写的不动
+    // 系统是否已有实用的 HiDPI 档位由设置页判断（DisplayManager.Display.hasHiDPIChoices，会按屏幕物理尺寸排除字太大的档位），
+    // 只有判断为没有时才会显示开关，这里不再重复判断，免得两边口径不一（如 24 寸 1080P 屏自带的 1024×576 HiDPI）。
+    // islet 自己以前写的配置直接换成新档位；别的工具写的不动
     let replacing = FileManager.default.fileExists(atPath: path)
     guard !replacing || isOwned(id) else { fail("这块屏已有其他工具写入的配置，没有改动") }
-    let ratio = Double(native.width) / Double(native.height)
-    guard replacing || !allModes(id).contains(where: { $0.pixelWidth >= $0.width * 2 && $0.width > native.width / 2 + 8 && $0.width < native.width
-        && abs(Double($0.width) / Double($0.height) / ratio - 1) <= 0.01 }) else { fail("这块屏已有系统提供的 HiDPI 档位，不需要再添加") }
     let sizes = scaledSizes(native: native)
     guard !sizes.isEmpty else { fail("这块屏的分辨率不适合添加 HiDPI 档位") }
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("islet-display-\(UUID().uuidString)")
@@ -198,13 +195,7 @@ case "remove":
 case "reconnect":
     let id = display(arguments.dropFirst().first)
     let displays = onlineDisplays()
-    guard CGDisplayIsActive(id) != 0, CGDisplayIsInMirrorSet(id) == 0,
-          displays.contains(where: { $0 != id && CGDisplayIsActive($0) != 0 && CGDisplayIsInMirrorSet($0) == 0 })
-    else { fail("需要另一块屏幕正在使用，才能用软件重新连接；也可以手动重新插拔这块屏") }
-    guard let library = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight", RTLD_LAZY),
-          let symbol = dlsym(library, "SLSConfigureDisplayEnabled") else { fail("本机不支持用软件重新连接，请手动重新插拔这块屏") }
-    typealias ConfigureEnabled = @convention(c) (CGDisplayConfigRef, CGDirectDisplayID, Bool) -> Int32
-    let configureEnabled = unsafeBitCast(symbol, to: ConfigureEnabled.self)
+    guard CGDisplayIsActive(id) != 0, CGDisplayIsInMirrorSet(id) == 0 else { fail("这块屏没在单独使用，请手动重新插拔") }
     // 正在用 HiDPI 档位时先正常切回原生分辨率，再断开：否则档位在重连时凭空消失，分辨率和缩放倍数一下子跳变，
     // 再按旧尺寸恢复排列，窗口拖动会和鼠标对不上。切换后系统会自己重排，下面记录的就是新位置。
     if let current = CGDisplayCopyDisplayMode(id), current.pixelWidth > current.width {
@@ -218,6 +209,11 @@ case "reconnect":
             Thread.sleep(forTimeInterval: 0.8)
         }
     }
+    // 只有这一块屏时也能断开再接上（实测会黑一两秒再亮回来）；万一接不回来，下面会提示手动插拔
+    guard let library = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight", RTLD_LAZY),
+          let symbol = dlsym(library, "SLSConfigureDisplayEnabled") else { fail("本机不支持用软件重新连接，请手动重新插拔这块屏") }
+    typealias ConfigureEnabled = @convention(c) (CGDisplayConfigRef, CGDirectDisplayID, Bool) -> Int32
+    let configureEnabled = unsafeBitCast(symbol, to: ConfigureEnabled.self)
     let origins = displays.filter { CGDisplayIsActive($0) != 0 }.map { ($0, CGDisplayBounds($0).origin) }
     func setEnabled(_ enabled: Bool) -> Bool {
         var transaction: CGDisplayConfigRef?
