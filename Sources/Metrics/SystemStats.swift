@@ -72,6 +72,7 @@ struct MemoryStats {
 struct ProcessSample {
     struct Entry {
         let path: String
+        var parentPID: Int32 = 0
         let cpuTime: Double   // 秒
         let memory: UInt64    // 字节
         let disk: (read: UInt64, written: UInt64)?  // 累计磁盘读写字节，仅自己的进程可读
@@ -82,7 +83,7 @@ struct ProcessSample {
     let entries: [Int32: Entry]
 
     static func sample() -> ProcessSample? {
-        guard let output = runTool("/bin/ps", ["-axo", "pid=,time=,rss=,comm="]) else { return nil }
+        guard let output = runTool("/bin/ps", ["-axo", "pid=,ppid=,time=,rss=,comm="]) else { return nil }
         let time = ProcessInfo.processInfo.systemUptime
         var entries: [Int32: Entry] = [:]
         var usage = rusage_info_v6()
@@ -95,6 +96,7 @@ struct ProcessSample {
                 return rest[..<end]
             }
             guard let pidText = token(), let pid = Int32(pidText),
+                  let parentText = token(), let parentPID = Int32(parentText),
                   let timeText = token(), let cpuTime = parseCPUTime(timeText),
                   let rssText = token(), let rss = UInt64(rssText) else { continue }
             let path = String(rest.drop { $0 == " " })
@@ -104,7 +106,7 @@ struct ProcessSample {
                     proc_pid_rusage(pid, RUSAGE_INFO_V6, $0)
                 }
             } == 0
-            entries[pid] = Entry(path: path, cpuTime: cpuTime,
+            entries[pid] = Entry(path: path, parentPID: parentPID, cpuTime: cpuTime,
                                  memory: readable ? usage.ri_phys_footprint : rss * 1024,
                                  disk: readable ? (usage.ri_diskio_bytesread, usage.ri_diskio_byteswritten) : nil,
                                  energy: readable ? usage.ri_energy_nj : nil)
@@ -139,7 +141,7 @@ struct ProcessSample {
         var pids: [String: [Int32]] = [:]
         for (pid, now) in entries {
             guard let old = previous.entries[pid], old.path == now.path, now.cpuTime > old.cpuTime else { continue }
-            let identity = AppIdentityResolver.identity(forPath: now.path)
+            let identity = memoryIdentity(for: pid)
             apps[identity, default: 0] += (now.cpuTime - old.cpuTime) / elapsed / cores * 100
             pids[identity, default: []].append(pid)
         }
@@ -158,7 +160,7 @@ struct ProcessSample {
             guard let disk = now.disk, let old = previous.entries[pid], old.path == now.path, let oldDisk = old.disk,
                   disk.read >= oldDisk.read, disk.written >= oldDisk.written,
                   disk.read > oldDisk.read || disk.written > oldDisk.written else { continue }
-            let identity = AppIdentityResolver.identity(forPath: now.path)
+            let identity = memoryIdentity(for: pid)
             apps[identity, default: (0, 0)].read += Double(disk.read - oldDisk.read) / elapsed
             apps[identity, default: (0, 0)].write += Double(disk.written - oldDisk.written) / elapsed
             pids[identity, default: []].append(pid)
@@ -176,7 +178,7 @@ struct ProcessSample {
         for (pid, now) in entries {
             guard let energy = now.energy, let old = previous.entries[pid], old.path == now.path,
                   let oldEnergy = old.energy, energy > oldEnergy else { continue }
-            let identity = AppIdentityResolver.identity(forPath: now.path)
+            let identity = memoryIdentity(for: pid)
             apps[identity, default: 0] += Double(energy - oldEnergy) / 1e9 / elapsed
             pids[identity, default: []].append(pid)
         }
@@ -185,18 +187,40 @@ struct ProcessSample {
             .map { RankedApp(identity: $0.key, values: [$0.value], pids: pids[$0.key] ?? []) }
     }
 
-    /// 按应用汇总的内存占用。
-    func memoryRanking() -> [RankedApp] {
-        var apps: [String: UInt64] = [:]
-        var pids: [String: [Int32]] = [:]
-        for (pid, entry) in entries {
-            let identity = AppIdentityResolver.identity(forPath: entry.path)
-            apps[identity, default: 0] += entry.memory
-            pids[identity, default: []].append(pid)
+    /// Application Support 内的内嵌应用通过父进程找到桌面宿主。
+    /// 独立启动的 CLI 遇到终端边界即停止，不按名称猜测归属。
+    func memoryIdentity(for pid: Int32) -> String {
+        guard let entry = entries[pid] else { return "" }
+        let own = AppIdentityResolver.identity(forPath: entry.path)
+        guard entry.path.contains("/Library/Application Support/") else { return own }
+        var cursor = entry.parentPID
+        var visited: Set<Int32> = [pid]
+        while cursor > 1, visited.insert(cursor).inserted, let parent = entries[cursor] {
+            let identity = AppIdentityResolver.identity(forPath: parent.path)
+            if identity.hasSuffix(".app"), identity != own {
+                if AppIdentityResolver.isTerminal(identity) { return own }
+                return identity
+            }
+            cursor = parent.parentPID
         }
-        return apps.sorted { $0.value > $1.value }
-            .map { RankedApp(identity: $0.key, values: [Double($0.value)], pids: pids[$0.key] ?? []) }
+        return own
     }
+
+    /// 按桌面应用汇总，保留可展开的可执行程序分组；每个 PID 只计入一次。
+    func memoryRanking() -> [RankedApp] {
+        var groups: [String: [String: [Int32]]] = [:]
+        for (pid, entry) in entries {
+            groups[memoryIdentity(for: pid), default: [:]][entry.path, default: []].append(pid)
+        }
+        return groups.map { identity, programs in
+            let children = programs.map { path, pids in
+                RankedApp(identity: path, values: [Double(pids.reduce(UInt64(0)) { $0 + (entries[$1]?.memory ?? 0) })], pids: pids.sorted())
+            }.sorted { $0.values[0] > $1.values[0] }
+            return RankedApp(identity: identity, values: [children.reduce(0) { $0 + $1.values[0] }],
+                             pids: children.flatMap(\.pids), children: children.count > 1 ? children : [])
+        }.sorted { $0.values[0] > $1.values[0] }
+    }
+
 }
 
 /// GPU：整体利用率和各进程累计 GPU 时间，均来自 IORegistry 中的 IOAccelerator（无需特权）。

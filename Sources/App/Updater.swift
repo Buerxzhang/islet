@@ -88,7 +88,10 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
         let target = FileManager.default.temporaryDirectory.appendingPathComponent("islet-update-\(UUID().uuidString).zip")
         let moved = status == 200 && (try? FileManager.default.moveItem(at: location, to: target)) != nil
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.session === session, let release = self.release else { return }
+            guard let self, self.session === session, let release = self.release else {
+                if moved { try? FileManager.default.removeItem(at: target) }
+                return
+            }
             guard status == 200 else { self.fail("下载失败（服务器返回 \(status)）"); return }
             guard moved else { self.fail("保存下载的文件失败"); return }
             self.session = nil
@@ -124,6 +127,7 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
     /// 核对下载的包：完整、是 islet、版本更新、签名完整、能写入现在的位置。返回解压出的新版。
     private static func prepare(_ zip: URL, _ release: UpdateChecker.Release) throws -> (app: URL, folder: URL) {
         let fileManager = FileManager.default
+        defer { try? fileManager.removeItem(at: zip) }
         // 1. 文件完整：和 GitHub 记录的 SHA-256 一致
         if let digest = release.digest {
             let data = try Data(contentsOf: zip)
@@ -132,6 +136,8 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
         }
         // 2. 解压，确认是 islet、版本对得上、签名完整
         let folder = fileManager.temporaryDirectory.appendingPathComponent("islet-update-\(UUID().uuidString)")
+        var prepared = false
+        defer { if !prepared { try? fileManager.removeItem(at: folder) } }
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
         guard Self.run("/usr/bin/ditto", ["-x", "-k", zip.path, folder.path]) else { throw UpdateError("解压失败") }
         try? fileManager.removeItem(at: zip)
@@ -148,6 +154,7 @@ final class Updater: NSObject, ObservableObject, URLSessionDownloadDelegate {
         guard fileManager.isWritableFile(atPath: current.deletingLastPathComponent().path) else {
             throw UpdateError("没有权限写入 \(current.deletingLastPathComponent().path)")
         }
+        prepared = true
         return (app, folder)
     }
 

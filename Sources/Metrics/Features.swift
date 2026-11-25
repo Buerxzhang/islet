@@ -16,9 +16,14 @@ enum ProcessControl {
     }
 
     /// 系统程序与本程序：不显示结束按钮。
-    static func isProtected(_ identity: String) -> Bool {
+    static func isSystem(_ identity: String) -> Bool {
         let system = ["/System/", "/usr/bin/", "/usr/sbin/", "/usr/libexec/", "/sbin/", "/bin/", "/Library/Apple/"]
         if system.contains(where: { identity.hasPrefix($0) }) { return true }
+        return false
+    }
+
+    static func isProtected(_ identity: String) -> Bool {
+        if isSystem(identity) { return true }
         return identity == Bundle.main.bundlePath || identity.hasPrefix(Bundle.main.bundlePath + "/")
     }
 

@@ -25,6 +25,8 @@ struct RankRowData: Identifiable {
     let tooltip: String
     let pids: [Int32]
     let canTerminate: Bool
+    var children: [RankRowData] = []
+    var isSystem = false
 }
 
 struct FanData {
@@ -37,6 +39,9 @@ final class PanelModel: ObservableObject {
     @Published var metric: Metric = .network
     @Published var hero = HeroData()
     @Published var rows: [RankRowData] = []
+    @Published var expandedApps: Set<String> = []
+    @Published var showSystemProcesses = false
+    @Published var systemTotals: [String] = []
     @Published var message: String? = "正在采样…"
     @Published var sampleMillis: Int?
     @Published var groups: [Temperatures.Group] = []
@@ -106,14 +111,24 @@ final class PanelModel: ObservableObject {
             return
         }
         let peak = apps.map { $0.values.reduce(0, +) }.max() ?? 0
-        rows = apps.map { app in
+        func makeRow(_ app: RankedApp, child: Bool = false) -> RankRowData {
             let (name, icon) = AppIcons.shared.info(for: app.identity, metric: metric)
             let total = app.values.reduce(0, +)
-            return RankRowData(id: app.identity, name: name, icon: icon, values: app.values.map(format),
+            return RankRowData(id: app.identity, name: child ? URL(fileURLWithPath: app.identity).lastPathComponent : name, icon: icon, values: app.values.map(format),
                                share: peak > 0 ? total / peak : 0, dim: total < 0.5,
                                tooltip: app.identity.hasPrefix("/") || Self.isWindowsPath(app.identity) ? app.identity : name,
-                               pids: app.pids, canTerminate: ProcessControl.canTerminate(app.identity, pids: app.pids))
+                               pids: app.pids, canTerminate: !child && ProcessControl.canTerminate(app.identity, pids: app.pids),
+                               children: app.children.map { makeRow($0, child: true) },
+                               isSystem: ProcessControl.isSystem(app.identity))
         }
+        let systemApps = apps.filter { ProcessControl.isSystem($0.identity) }
+        let columnCount = apps.map { $0.values.count }.max() ?? 0
+        systemTotals = (0..<columnCount).map { column in
+            format(systemApps.reduce(0) { total, app in
+                total + (app.values.indices.contains(column) ? app.values[column] : 0)
+            })
+        }
+        rows = apps.map { makeRow($0) }
     }
 }
 
@@ -708,6 +723,8 @@ struct PanelView: View {
     private func rankingCard(_ p: Palette, limit: Int?) -> some View {
         if let title = model.metric.rankingTitle {
             let columns = model.metric.columns
+            let applications = model.rows.filter { !$0.isSystem }
+            let system = model.rows.filter { $0.isSystem }
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader(title: title, trailing: model.metric == .fan ? "按功耗" : nil)
                 Card(padding: 10) {
@@ -722,8 +739,33 @@ struct PanelView: View {
                             Text(message).font(Typo.body).foregroundStyle(p.text3)
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
                         }
-                        ForEach(Array(model.rows.prefix(limit ?? model.rows.count))) { row in
-                            rankRow(p, row)
+                        if applications.isEmpty, !model.rows.isEmpty {
+                            Text("当前没有活跃的应用数据").font(Typo.body).foregroundStyle(p.text3)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
+                        }
+                        ForEach(Array(applications.prefix(limit ?? applications.count))) { row in
+                            applicationRows(p, row)
+                        }
+                        if !system.isEmpty {
+                            Divider().padding(.vertical, 6)
+                            Button {
+                                model.showSystemProcesses.toggle()
+                            } label: {
+                                HStack {
+                                    Image(systemName: model.showSystemProcesses ? "chevron.down" : "chevron.right")
+                                    Text("系统进程（\(system.count)）")
+                                    Spacer()
+                                    ForEach(model.systemTotals.indices, id: \.self) { index in
+                                        Text(model.systemTotals[index]).font(Typo.number(12, .medium))
+                                            .foregroundStyle(p.text)
+                                            .frame(width: model.systemTotals.count > 1 ? 58 : 64, alignment: .trailing)
+                                    }
+                                    Color.clear.frame(width: 18, height: 18)
+                                }.font(Typo.caption).foregroundStyle(p.text3).contentShape(Rectangle())
+                            }.buttonStyle(.plain).help("系统组件仅显示占用，不提供退出操作")
+                            if model.showSystemProcesses {
+                                ForEach(system) { row in systemProcessRow(p, row) }
+                            }
                         }
                     }
                 }
@@ -735,8 +777,46 @@ struct PanelView: View {
         }
     }
 
+    private func systemProcessRow(_ p: Palette, _ row: RankRowData) -> some View {
+        let names = ["loginwindow": "登录窗口", "mds_stores": "聚焦索引", "mds": "聚焦搜索",
+                     "mdworker": "聚焦索引任务", "mdworker_shared": "聚焦索引任务",
+                     "WindowServer": "窗口服务", "coreaudiod": "系统音频", "Passwords": "密码"]
+        return HStack(spacing: 8) {
+            Image(nsImage: row.icon).resizable()
+                .renderingMode(row.icon.isTemplate ? .template : .original)
+                .foregroundStyle(p.text3).frame(width: 14, height: 14)
+            Text(names[row.name] ?? row.name).font(Typo.body).foregroundStyle(p.text2)
+                .lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(row.values.indices, id: \.self) { index in
+                Text(row.values[index]).font(Typo.number(12, .medium)).foregroundStyle(p.text2)
+                    .frame(width: row.values.count > 1 ? 58 : 64, alignment: .trailing)
+            }
+            Color.clear.frame(width: 18, height: 18)
+        }
+        .padding(.leading, 14).frame(height: 26)
+        .help("\(row.name)\n\(row.tooltip)")
+    }
+
+    private func applicationRows(_ p: Palette, _ row: RankRowData) -> some View {
+        VStack(spacing: 0) {
+            rankRow(p, row)
+            if model.expandedApps.contains(row.id) {
+                ForEach(row.children) { child in rankRow(p, child).padding(.leading, 20) }
+            }
+        }
+    }
+
     private func rankRow(_ p: Palette, _ row: RankRowData) -> some View {
         HStack(spacing: 8) {
+            if !row.children.isEmpty {
+                Button {
+                    if !model.expandedApps.insert(row.id).inserted { model.expandedApps.remove(row.id) }
+                } label: {
+                    Image(systemName: model.expandedApps.contains(row.id) ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(p.text3)
+                        .frame(width: 12, height: 22).contentShape(Rectangle())
+                }.buttonStyle(.plain).help("展开或收起子程序")
+            }
             Image(nsImage: row.icon).resizable()
                 .renderingMode(row.icon.isTemplate ? .template : .original)
                 .foregroundStyle(p.text3)

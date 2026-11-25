@@ -26,6 +26,7 @@ struct RankedApp {
     let values: [Double]
     /// 这一行包含的进程号（结束进程时直接按它们操作，不靠路径反查）。
     var pids: [Int32] = []
+    var children: [RankedApp] = []
 }
 
 /// 各进程累计收发字节数（nettop）。
@@ -91,11 +92,32 @@ final class AppIdentityResolver {
         return path
     }
 
+    static func isTerminal(_ identity: String) -> Bool {
+        ["Terminal.app", "iTerm.app", "iTerm2.app", "Warp.app", "Alacritty.app", "kitty.app", "Ghostty.app"]
+            .contains(URL(fileURLWithPath: identity).lastPathComponent)
+    }
+
     private func resolve(_ key: String) -> String {
         guard let dot = key.lastIndex(of: "."), let pid = Int32(key[key.index(after: dot)...]) else { return key }
         let length = buffer.withUnsafeMutableBufferPointer { proc_pidpath(pid, $0.baseAddress, UInt32($0.count)) }
         guard length > 0 else { return String(key[..<dot]) }
-        return Self.identity(forPath: buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) })
+        let path = buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+        let own = Self.identity(forPath: path)
+        guard path.contains("/Library/Application Support/") else { return own }
+        var cursor = pid
+        var visited: Set<Int32> = []
+        while cursor > 1, visited.insert(cursor).inserted {
+            var info = proc_bsdshortinfo()
+            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+            guard proc_pidinfo(cursor, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size else { break }
+            cursor = Int32(info.pbsi_ppid)
+            guard cursor > 1, proc_pidpath(cursor, &buffer, UInt32(buffer.count)) > 0 else { break }
+            let parent = Self.identity(forPath: String(cString: buffer))
+            if parent.hasSuffix(".app"), parent != own {
+                return Self.isTerminal(parent) ? own : parent
+            }
+        }
+        return own
     }
 }
 

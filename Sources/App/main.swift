@@ -698,6 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             if metric == .disk { panel.volumes = ExternalVolumes.list() }
             collect(metric) { [self] result in
                 render(result, metric: metric)
+                if CommandLine.arguments.contains("systemprocesses") { panel.showSystemProcesses = true }
                 if CommandLine.arguments.contains("demo") {
                     panel.rows = Self.demoRows(metric, columns: panel.rows.first?.values.count ?? 1)   // README 截图：不暴露本机进程
                 } else {
