@@ -101,7 +101,8 @@ final class FPSMeter: NSObject, SCStreamOutput, SCStreamDelegate {
             previousTick = now
             self.frames = 0
             let name = self.targetName
-            DispatchQueue.main.async { self.onSample(count, name) }
+            let onSample = self.onSample
+            DispatchQueue.main.async { onSample(count, name) }
         }
         ticker.resume()
         self.ticker = ticker

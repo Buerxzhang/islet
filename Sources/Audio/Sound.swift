@@ -54,7 +54,9 @@ enum AudioSystem {
         var addr = address(selector, scope)
         guard AudioObjectHasProperty(object, &addr) else { return false }
         var size = UInt32(MemoryLayout<T>.size)
-        return AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &value) == noErr
+        return withUnsafeMutableBytes(of: &value) { buffer in
+            AudioObjectGetPropertyData(object, &addr, 0, nil, &size, buffer.baseAddress!) == noErr
+        }
     }
 
     private static func set<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
@@ -64,7 +66,9 @@ enum AudioSystem {
         guard AudioObjectHasProperty(object, &addr), AudioObjectIsPropertySettable(object, &addr, &settable) == noErr,
               settable.boolValue else { return }
         var value = value
-        AudioObjectSetPropertyData(object, &addr, 0, nil, UInt32(MemoryLayout<T>.size), &value)
+        withUnsafeBytes(of: &value) { buffer in
+            _ = AudioObjectSetPropertyData(object, &addr, 0, nil, UInt32(MemoryLayout<T>.size), buffer.baseAddress!)
+        }
     }
 
     static var defaultOutput: AudioDeviceID {
@@ -105,10 +109,39 @@ enum AudioSystem {
                deviceName.lowercased().hasPrefix("islet") || deviceName.hasPrefix("系统监控") {
                 return nil
             }
-            return AudioOutput(id: id, name: deviceName, transport: transport, volume: volume(of: id))
+            let displayName = (transport == kAudioDeviceTransportTypeHDMI || transport == kAudioDeviceTransportTypeDisplayPort)
+                ? displayLabel(for: id, name: deviceName)
+                : deviceName
+            return AudioOutput(id: id, name: displayName, transport: transport, volume: volume(of: id))
         }
         // 内置扬声器排第一，其余按名称
         .sorted { ($0.transport == kAudioDeviceTransportTypeBuiltIn ? 0 : 1, $0.name) < ($1.transport == kAudioDeviceTransportTypeBuiltIn ? 0 : 1, $1.name) }
+    }
+
+    /// 多屏时为显示器音频输出标注“主屏 / 扩展屏”，与设置页和全屏模式保持一致。
+    private static func displayLabel(for deviceID: AudioDeviceID, name: String) -> String {
+        let screens = NSScreen.screens
+        guard screens.count > 1 else { return name }
+        var uidRef: Unmanaged<CFString>?
+        let uid = get(deviceID, kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal, &uidRef)
+            ? (uidRef?.takeRetainedValue() as String?)
+            : nil
+        func role(at index: Int) -> String {
+            if index == 0 { return "主屏" }
+            return screens.count == 2 ? "扩展屏" : "扩展屏 \(index)"
+        }
+        if let uid {
+            for (index, screen) in screens.enumerated() {
+                if let screenUID = AppDelegate.screenUUID(screen), screenUID.caseInsensitiveCompare(uid) == .orderedSame {
+                    return "\(name)（\(role(at: index))）"
+                }
+            }
+        }
+        let matches = screens.enumerated().filter { $0.element.localizedName == name }
+        if matches.count == 1, let match = matches.first {
+            return "\(name)（\(role(at: match.offset))）"
+        }
+        return name
     }
 
     static func volume(of id: AudioDeviceID) -> Float? {

@@ -27,16 +27,27 @@ struct SoundSource: Equatable {
             guard property(id, kAudioProcessPropertyIsRunningOutput, &running), running != 0 else { return nil }
             var pid: pid_t = 0
             guard property(id, kAudioProcessPropertyPID, &pid), pid > 0, pid != me else { return nil }
-            var bundleRef: CFString = "" as CFString
-            let audioBundle = property(id, kAudioProcessPropertyBundleID, &bundleRef) ? bundleRef as String : ""
+            let audioBundle = stringProperty(id, kAudioProcessPropertyBundleID)
             return resolve(pid: pid, audioBundle: audioBundle)
         }
+    }
+
+    private static func stringProperty(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        var ref: Unmanaged<CFString>?
+        let status = withUnsafeMutableBytes(of: &ref) { buffer in
+            AudioObjectGetPropertyData(id, &address, 0, nil, &size, buffer.baseAddress!)
+        }
+        return status == noErr ? (ref?.takeRetainedValue() as String? ?? "") : ""
     }
 
     private static func property<T>(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector, _ value: inout T) -> Bool {
         var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size = UInt32(MemoryLayout<T>.size)
-        return AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr
+        return withUnsafeMutableBytes(of: &value) { buffer in
+            AudioObjectGetPropertyData(id, &address, 0, nil, &size, buffer.baseAddress!) == noErr
+        }
     }
 
     /// 进程 → 用户认得的程序：本身是应用；或沿父进程找到应用（浏览器、剪辑软件的辅助进程）；
@@ -189,7 +200,7 @@ enum WindowsExecutable {
 
         /// 资源目录的子项：(编号, 偏移, 是否子目录)
         func entries(_ offset: Int) -> [(id: UInt32, offset: Int, isDir: Bool)] {
-            guard offset + 16 <= res.count else { return [] }
+            guard offset >= 0, offset + 16 <= res.count else { return [] }
             let count = Int(res.u16(offset + 12)) + Int(res.u16(offset + 14))
             return (0..<count).compactMap { i in
                 let at = offset + 16 + i * 8
@@ -209,7 +220,7 @@ enum WindowsExecutable {
             guard node.offset + 8 <= res.count else { return nil }
             let rva = res.u32(node.offset), size = Int(res.u32(node.offset + 4))
             let start = Int(rva) - Int(resourceRVA)
-            guard start >= 0, start + size <= res.count else { return nil }
+            guard size >= 0, start >= 0, size <= res.count - start else { return nil }
             return res.subdata(in: start..<start + size)
         }
 

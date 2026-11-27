@@ -74,6 +74,7 @@ final class NowPlayingMonitor: ObservableObject {
                                             "com.kugou.mac.kugouMusic", "com.kuwo.mac.KwMusic", "com.apple.podcasts"]
 
     private var process: Process?
+    private var outputHandle: FileHandle?
     private var buffer = Data()
     private var running = false
     private var artworkCache: (id: String, image: NSImage, tint: NSColor?)?
@@ -101,8 +102,11 @@ final class NowPlayingMonitor: ObservableObject {
 
     func stop() {
         running = false
+        outputHandle?.readabilityHandler = nil
+        outputHandle = nil
         process?.terminate()
         process = nil
+        buffer.removeAll()
         // 延时任务一并取消，否则过一会儿会把旧的播放信息写回来
         clearWork?.cancel()
         pauseWork?.cancel()
@@ -133,20 +137,27 @@ final class NowPlayingMonitor: ObservableObject {
         guard running, let adapterPath else { return }
         let task = Process()
         let pipe = Pipe()
+        outputHandle = pipe.fileHandleForReading
         task.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
         task.arguments = ["-e", Self.script, adapterPath, "adapter_stream"]
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
             DispatchQueue.main.async { self?.consume(data) }
         }
-        task.terminationHandler = { [weak self] _ in
+        task.terminationHandler = { [weak self, weak task] _ in
             DispatchQueue.main.async {
-                guard let self, self.running else { return }
+                guard let self, self.running, let task, self.process === task else { return }
                 // 意外退出：5 秒后重启
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.launch() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak task] in
+                    guard let self, self.running, let task, self.process === task else { return }
+                    self.launch()
+                }
             }
         }
         do {

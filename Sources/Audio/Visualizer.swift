@@ -26,6 +26,7 @@ final class VisualizerModel: ObservableObject {
     let bars = VisualizerBars()
     @Published var info: NowPlayingInfo?
     @Published var source: SoundSource?
+    @Published var accentTint: NSColor?
     @Published var audible = false
     @Published var controlsVisible = true
     /// 已连接的屏幕名称和当前所在的那块（多屏时右上角可切换）。
@@ -38,12 +39,13 @@ final class VisualizerModel: ObservableObject {
     var demo = false
 
     /// 歌曲信息变化时调用（不是每帧）。
-    func setNowPlaying(_ info: NowPlayingInfo?, source: SoundSource?) {
+    func setNowPlaying(_ info: NowPlayingInfo?, source: SoundSource?, tint: NSColor? = nil) {
         let music = source == nil ? info : nil
         if self.info?.title != music?.title || self.info?.playing != music?.playing || self.info?.artwork !== music?.artwork
-            || self.info?.elapsed != music?.elapsed || self.source != source {
+            || self.info?.elapsed != music?.elapsed || self.source != source || self.accentTint != tint {
             self.info = music
             self.source = source
+            self.accentTint = tint
         }
     }
 
@@ -55,8 +57,8 @@ struct VisualizerView: View {
     @ObservedObject var model: VisualizerModel
 
     private var info: NowPlayingInfo? { model.info }
-    /// 频谱主色：封面主色；黑白封面等取不到时用白色。
-    private var tint: Color { info?.tint.map(Color.init) ?? .white }
+    /// 频谱主色：封面主色或软件图标主色；取不到时用白色。
+    private var tint: Color { (model.accentTint ?? info?.tint).map(Color.init) ?? .white }
 
     var body: some View {
         GeometryReader { geo in
@@ -295,21 +297,32 @@ final class VisualizerWindowController: NSObject, NSWindowDelegate {
     let model = VisualizerModel()
     private var window: Window?
     private var mouseMonitor: Any?
+    private var screenObserver: NSObjectProtocol?
     private var hideWork: DispatchWorkItem?
     var isOpen: Bool { window != nil }
     var onClosed: () -> Void = {}
 
     private static let screenKey = "visualizerScreen"
 
-    /// 选过的屏幕（按名称记住）；没接着就用点开面板的那块。
+    /// 选过的屏幕（优先按 UUID 匹配，兼容旧版按名称记住）；没接着就用点开面板的那块。
     private static func preferredScreen(fallback: NSScreen?) -> NSScreen? {
-        let name = UserDefaults.standard.string(forKey: screenKey)
-        return NSScreen.screens.first { $0.localizedName == name } ?? fallback ?? NSScreen.main
+        let saved = UserDefaults.standard.string(forKey: screenKey)
+        return NSScreen.screens.first { AppDelegate.screenUUID($0) == saved || $0.localizedName == saved }
+            ?? fallback ?? NSScreen.main
+    }
+
+    private static func screenLabels(for screens: [NSScreen]) -> [String] {
+        guard screens.count > 1 else { return screens.map(\.localizedName) }
+        return screens.enumerated().map { index, screen in
+            if index == 0 { return "\(screen.localizedName)（主屏）" }
+            if screens.count == 2 { return "\(screen.localizedName)（扩展屏）" }
+            return "\(screen.localizedName)（扩展屏 \(index)）"
+        }
     }
 
     private func updateScreens(current: NSScreen?) {
         let screens = NSScreen.screens
-        model.screenNames = screens.map(\.localizedName)
+        model.screenNames = Self.screenLabels(for: screens)
         model.currentScreen = current.flatMap { screens.firstIndex(of: $0) } ?? 0
     }
 
@@ -318,7 +331,7 @@ final class VisualizerWindowController: NSObject, NSWindowDelegate {
         let screens = NSScreen.screens
         guard let window, screens.indices.contains(index) else { return }
         let screen = screens[index]
-        UserDefaults.standard.set(screen.localizedName, forKey: Self.screenKey)
+        UserDefaults.standard.set(AppDelegate.screenUUID(screen) ?? screen.localizedName, forKey: Self.screenKey)
         window.setFrame(screen.frame, display: true)
         updateScreens(current: screen)
     }
@@ -349,6 +362,9 @@ final class VisualizerWindowController: NSObject, NSWindowDelegate {
             self?.revealControls()
             return event
         }
+        screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.updateScreens(current: self?.window?.screen)
+        }
         revealControls()
     }
 
@@ -357,6 +373,8 @@ final class VisualizerWindowController: NSObject, NSWindowDelegate {
         hideWork?.cancel()
         if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
         mouseMonitor = nil
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        screenObserver = nil
         NSCursor.unhide()
         self.window = nil
         NSAnimationContext.runAnimationGroup({ $0.duration = 0.2; window.animator().alphaValue = 0 }) {

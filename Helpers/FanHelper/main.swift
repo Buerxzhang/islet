@@ -154,7 +154,7 @@ final class FanController {
         var ok = true
         for (index, fan) in fans.enumerated() {
             let value = fan.minimum + (fan.maximum - fan.minimum) * fraction
-            ok = enterManual(index) && SMC.shared.writeFloat("F\(index)Tg", Float(value)) && ok
+            ok = enterManual(index) && SMC.shared.writeRPM("F\(index)Tg", value) && ok
         }
         if ok {
             failures = 0

@@ -924,7 +924,8 @@ final class SpectrumController: NSObject, NSPopoverDelegate {
             playerBundle = nil
             sourceIconPID = source.pid
             barsView?.appIcon = source.cgIcon
-            barsView?.iconTint = source.icon.flatMap(NowPlayingMonitor.dominantColor(of:))
+            currentIconTint = source.icon.flatMap(NowPlayingMonitor.dominantColor(of:))
+            barsView?.iconTint = currentIconTint
             barsView?.playing = false
         } else {
             panel.nowPlaying = info?.placeholder == true ? nil : info
@@ -933,22 +934,29 @@ final class SpectrumController: NSObject, NSPopoverDelegate {
             barsView?.hasMedia = info != nil
             barsView?.musicApp = info?.isMusicApp == true && info?.placeholder != true   // 占位时没有按钮
             // 视图刚建好时图标还没设（信息可能比视图先到）：也要补上
-            if info?.bundle != playerBundle || sourceIconPID != nil || barsView?.appIcon == nil {
+            if info?.bundle != playerBundle || sourceIconPID != nil || barsView?.appIcon == nil || (info?.bundle != nil && currentIconTint == nil) {
                 sourceIconPID = nil
                 playerBundle = info?.bundle
                 barsView?.appIcon = playerBundle.flatMap(Self.appIcon(bundle:))
-                barsView?.iconTint = playerBundle.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+                currentIconTint = playerBundle.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
                     .map { NSWorkspace.shared.icon(forFile: $0.path) }.flatMap(NowPlayingMonitor.dominantColor(of:))
+                barsView?.iconTint = currentIconTint
             }
             barsView?.playing = info?.playing ?? false
             barsView?.playPauseOnly = !(info?.canSkip ?? true)
         }
+        let albumTint = source == nil ? info?.tint : nil
+        let effectiveTint = SpectrumLook.current.tint == .icon
+            ? (currentIconTint ?? albumTint)
+            : (albumTint ?? currentIconTint)
+        panel.accentTint = effectiveTint
         barsView?.refresh()
         resize()
         if host != nil { host?.spectrumLayoutChanged() }   // 底色可能随封面颜色变化
-        visualizer.model.setNowPlaying(panel.nowPlaying, source: panel.source)
+        visualizer.model.setNowPlaying(panel.nowPlaying, source: panel.source, tint: effectiveTint)
     }
     private var sourceIconPID: pid_t?
+    private var currentIconTint: NSColor?
 
     /// 正在运行的音乐软件（几个都开着时取最近打开的）
     private var runningMusicApp: String?

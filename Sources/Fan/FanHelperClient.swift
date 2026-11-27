@@ -198,13 +198,13 @@ final class FanHelperClient: ObservableObject {
         set -e
         launchctl bootout system/\(label) 2>/dev/null || true
         mkdir -p /Library/PrivilegedHelperTools
-        install -o root -g wheel -m 755 '\(source)/isletFanHelper' '\(FanControl.helperPath)'
-        install -o root -g wheel -m 644 '\(source)/\(label).plist' '\(FanControl.plistPath)'
+        install -o root -g wheel -m 755 \(shellQuoted("\(source)/isletFanHelper")) \(shellQuoted(FanControl.helperPath))
+        install -o root -g wheel -m 644 \(shellQuoted("\(source)/\(label).plist")) \(shellQuoted(FanControl.plistPath))
         if launchctl print system/\(previousLabel) >/dev/null 2>&1; then
             launchctl bootout system/\(previousLabel)
         fi
-        launchctl bootstrap system '\(FanControl.plistPath)' || { sleep 1; launchctl bootstrap system '\(FanControl.plistPath)'; }
-        rm -f '/Library/PrivilegedHelperTools/\(previousLabel)' '/Library/LaunchDaemons/\(previousLabel).plist'
+        launchctl bootstrap system \(shellQuoted(FanControl.plistPath)) || { sleep 1; launchctl bootstrap system \(shellQuoted(FanControl.plistPath)); }
+        rm -f \(shellQuoted("/Library/PrivilegedHelperTools/\(previousLabel)")) \(shellQuoted("/Library/LaunchDaemons/\(previousLabel).plist"))
         """
         connection?.invalidate()
         connection = nil
@@ -221,7 +221,7 @@ final class FanHelperClient: ObservableObject {
         let label = FanControl.label
         let script = """
         launchctl bootout system/\(label) 2>/dev/null || true
-        rm -f '\(FanControl.helperPath)' '\(FanControl.plistPath)'
+        rm -f \(shellQuoted(FanControl.helperPath)) \(shellQuoted(FanControl.plistPath))
         """
         connection?.invalidate()
         connection = nil
@@ -229,6 +229,10 @@ final class FanHelperClient: ObservableObject {
         status = nil
         objectWillChange.send()
         return error
+    }
+
+    private func shellQuoted(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private func runAsAdministrator(_ script: String, prompt: String) -> String? {

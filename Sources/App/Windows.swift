@@ -1076,6 +1076,10 @@ struct SettingsView: View {
                 if displays.displays.isEmpty {
                     Text("没有检测到显示器").font(Typo.settingsCaption).foregroundStyle(p.text3).padding(.vertical, 10)
                 }
+                if displays.displays.count > 1 {
+                    displayArrangementView(p)
+                    divider(p)
+                }
                 ForEach(Array(displays.displays.enumerated()), id: \.element.id) { index, display in
                     if index > 0 { divider(p) }
                     displayRow(p, display)
@@ -1090,6 +1094,98 @@ struct SettingsView: View {
         }
         .onAppear { displays.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in displays.refresh() }
+    }
+
+    /// 显示器排列状态图：按桌面坐标等比缩放到固定高度区域，区分主屏、扩展屏、镜像和已关闭状态。
+    private func displayArrangementView(_ p: Palette) -> some View {
+        let validBounds = displays.displays.map(\.bounds).filter { $0.width > 0 && $0.height > 0 }
+        let baseUnion = validBounds.reduce(CGRect.null) { $0.isNull ? $1 : $0.union($1) }
+        let fallbackOriginX = baseUnion.isNull ? 0 : baseUnion.maxX + 120
+        let fallbackOriginY = baseUnion.isNull ? 0 : baseUnion.minY
+        let fallbackSize = CGSize(width: 1440, height: 900)
+
+        var offscreenIndex = 0
+        let boxes: [(display: DisplayManager.Display, rect: CGRect)] = displays.displays.map { display in
+            if display.bounds.width > 0 && display.bounds.height > 0 {
+                return (display, display.bounds)
+            }
+            let x = fallbackOriginX + CGFloat(offscreenIndex) * (fallbackSize.width + 120)
+            offscreenIndex += 1
+            return (display, CGRect(origin: CGPoint(x: x, y: fallbackOriginY), size: fallbackSize))
+        }
+        let union = boxes.map(\.rect).reduce(CGRect.null) { $0.isNull ? $1 : $0.union($1) }
+        let activeCount = displays.displays.filter(\.active).count
+        let offCount = displays.displays.count - activeCount
+        let summary: String = {
+            if offCount > 0 { return "排列状态：\(activeCount) 块开启，\(offCount) 块已关闭" }
+            if displays.displays.contains(where: \.mirrored) { return "排列状态：镜像模式" }
+            return "排列状态：主屏 + \(max(displays.displays.count - 1, 0)) 块扩展屏"
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { geo in
+                let pad: CGFloat = 14
+                let availW = max(geo.size.width - pad * 2, 1)
+                let availH = max(geo.size.height - pad * 2, 1)
+                let scale = union.width > 0 && union.height > 0 ? min(availW / union.width, availH / union.height) : 1
+                let contentW = union.width * scale
+                let contentH = union.height * scale
+                let offsetX = (geo.size.width - contentW) / 2
+                let offsetY = (geo.size.height - contentH) / 2
+
+                ZStack(alignment: .topLeading) {
+                    ForEach(boxes, id: \.display.id) { item in
+                        let w = max(item.rect.width * scale, 44)
+                        let h = max(item.rect.height * scale, 28)
+                        let x = offsetX + (item.rect.minX - union.minX) * scale
+                        let y = offsetY + (item.rect.minY - union.minY) * scale
+                        let d = item.display
+                        let role = !d.active ? "已关闭" : d.isMain ? "主屏" : d.mirrored ? "镜像" : "扩展屏"
+
+                        ZStack(alignment: .top) {
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(!d.active ? p.inset.opacity(0.45) : d.isMain ? p.accentFill.opacity(0.14) : p.card)
+                            if d.active {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(d.isMain ? p.accentFill.opacity(0.75) : p.text3.opacity(0.35), lineWidth: d.isMain ? 1.5 : 1)
+                            } else {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(p.text3.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            }
+                            if d.isMain && d.active {
+                                Rectangle()
+                                    .fill(p.accentFill.opacity(0.6))
+                                    .frame(height: 3)
+                                    .clipShape(RoundedRectangle(cornerRadius: 1.5))
+                                    .padding(.horizontal, 4)
+                                    .padding(.top, 3)
+                            }
+                            VStack(spacing: 1) {
+                                Text(d.name)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(d.active ? p.text : p.text3)
+                                    .lineLimit(1)
+                                Text(role)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(d.isMain && d.active ? p.accentText : p.text3)
+                            }
+                            .padding(.horizontal, 6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .frame(width: w, height: h)
+                        .offset(x: x, y: y)
+                        .opacity(d.active ? 1 : 0.65)
+                    }
+                }
+            }
+            .frame(height: 112)
+            .background(RoundedRectangle(cornerRadius: 8).fill(p.inset))
+
+            Text(summary)
+                .font(Typo.settingsCaption)
+                .foregroundStyle(p.text3)
+        }
+        .padding(.vertical, 10)
     }
 
     private enum HiDPISwitch { case none, off, on }
@@ -1116,7 +1212,7 @@ struct SettingsView: View {
         let showSizes = display.canSwitch && options.count > 1 && displays.awaitingReconnect[display.id] != false
         let subtitle: String
         if !display.active {
-            subtitle = "未启用"
+            subtitle = "已关闭"
         } else {
             let mode = "\(current.size) \(current.hiDPI ? "HiDPI" : "普通")"
             let details = [mode, current.rate].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -1129,18 +1225,47 @@ struct SettingsView: View {
                 : !current.native ? "普通分辨率，放大显示会发虚" : nil
             subtitle = note.map { "\(details)\n\($0)" } ?? details
         }
+        let activeCount = displays.displays.filter(\.active).count
+        let canTogglePower = displays.displays.count > 1 && (!display.active || activeCount > 1)
         return VStack(alignment: .leading, spacing: 0) {
             row(p, display.isMain ? "\(display.name)（主屏）" : displays.displays.count > 1 ? "\(display.name)（扩展屏）" : display.name, subtitle,
-                icon: display.builtIn ? "laptopcomputer" : "display", tint: Color(hex: 0x0A84FF)) {
-                if hiDPI != .none {
-                    HStack(spacing: 8) {
-                        Text("HiDPI 支持").font(Typo.settingsBody).foregroundStyle(p.text2)
-                        Toggle2(isOn: hiDPI == .on) { setHiDPI($0, on: display) }
+                icon: display.builtIn ? "laptopcomputer" : "display", tint: display.active ? Color(hex: 0x0A84FF) : Color(hex: 0x8E8E93)) {
+                HStack(spacing: 10) {
+                    if hiDPI != .none {
+                        HStack(spacing: 8) {
+                            Text("HiDPI 支持").font(Typo.settingsBody).foregroundStyle(p.text2)
+                            Toggle2(isOn: hiDPI == .on) { setHiDPI($0, on: display) }
+                        }
+                        .disabled(displays.busy)
+                    } else if let note = hiDPINote(display) {
+                        // 没有开关的屏幕也说明一下原因，免得让人以为功能缺了
+                        Text(note).font(Typo.settingsCaption).foregroundStyle(p.text3)
                     }
-                    .disabled(displays.busy)
-                } else if let note = hiDPINote(display) {
-                    // 没有开关的屏幕也说明一下原因，免得让人以为功能缺了
-                    Text(note).font(Typo.settingsCaption).foregroundStyle(p.text3)
+                    if displays.displays.count > 1 {
+                        Button {
+                            if display.active {
+                                confirmAlert("关闭 \(display.name)？",
+                                             "关闭后这块屏幕会熄屏。你可以随时在这里点“开启”重新点亮，或重新插拔视频线恢复。") {
+                                    displays.setEnabled(false, on: display)
+                                }
+                            } else {
+                                displays.setEnabled(true, on: display)
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "power").font(.system(size: 11, weight: .semibold))
+                                Text(display.active ? "关闭" : "开启").font(Typo.settingsCaption.weight(.medium))
+                            }
+                            .foregroundStyle(display.active ? p.text2 : .white)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(display.active ? p.inset : p.accentFill))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(displays.busy || !canTogglePower)
+                        .opacity(canTogglePower ? 1 : 0.45)
+                        .help(canTogglePower ? (display.active ? "关闭这块显示器" : "开启这块显示器") : "至少需要保留一块开启的显示器")
+                    }
                 }
             }
             if showSizes { sizePicker(p, display, options) }

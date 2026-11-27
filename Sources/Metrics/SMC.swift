@@ -61,6 +61,25 @@ final class SMC {
         return write(key, [0, 8, 16, 24].map { UInt8((bits >> $0) & 0xff) })
     }
 
+    /// 写入风扇目标转速：按 SMC 键实际类型编码（Intel 常见 fpe2，Apple Silicon 为 flt）。
+    @discardableResult
+    func writeRPM(_ key: String, _ rpm: Double) -> Bool {
+        let type: String?
+        if let cached = keyInfo[key]?.type {
+            type = cached
+        } else if let raw = raw(key) {
+            keyInfo[key] = (UInt32(raw.bytes.count), raw.type)
+            type = raw.type
+        } else {
+            type = nil
+        }
+        if type == "fpe2" {
+            let encoded = UInt16(clamping: Int((rpm * 4).rounded()))
+            return write(key, [UInt8(encoded >> 8), UInt8(encoded & 0xff)])
+        }
+        return writeFloat(key, Float(rpm))
+    }
+
     /// 最近一次写入失败：键名和错误码，给日志用。
     private(set) var lastWriteFailure: (key: String, code: Int32)?
 

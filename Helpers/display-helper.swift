@@ -9,6 +9,7 @@ import Foundation
 //   install <屏幕 ID>           按这块屏的原生分辨率生成 HiDPI 档位，写入系统覆盖配置（需要管理员密码）
 //   remove <屏幕 ID>            删除 islet 添加的覆盖配置（需要管理员密码；别的工具写的不碰）
 //   reconnect <屏幕 ID>         用软件断开再接上这块屏，让新档位生效（需要另一块屏在用）
+//   enable|disable <屏幕 ID>    开启或关闭这块显示器
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 
@@ -147,6 +148,20 @@ func configure(_ display: CGDirectDisplayID, mode: CGDisplayMode, option: CGConf
     return CGCompleteDisplayConfiguration(transaction, option) == .success
 }
 
+func setDisplayEnabled(_ id: CGDirectDisplayID, enabled: Bool) -> Bool {
+    guard let library = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight", RTLD_LAZY),
+          let symbol = dlsym(library, "SLSConfigureDisplayEnabled") else { return false }
+    typealias ConfigureEnabled = @convention(c) (CGDisplayConfigRef, CGDirectDisplayID, Bool) -> Int32
+    let configureEnabled = unsafeBitCast(symbol, to: ConfigureEnabled.self)
+    var transaction: CGDisplayConfigRef?
+    guard CGBeginDisplayConfiguration(&transaction) == .success, let transaction else { return false }
+    guard configureEnabled(transaction, id, enabled) == 0 else {
+        CGCancelDisplayConfiguration(transaction)
+        return false
+    }
+    return CGCompleteDisplayConfiguration(transaction, .forSession) == .success
+}
+
 switch arguments.first {
 case "status":
     let id = display(arguments.dropFirst().first)
@@ -210,22 +225,12 @@ case "reconnect":
         }
     }
     // 只有这一块屏时也能断开再接上（实测会黑一两秒再亮回来）；万一接不回来，下面会提示手动插拔
-    guard let library = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight", RTLD_LAZY),
-          let symbol = dlsym(library, "SLSConfigureDisplayEnabled") else { fail("本机不支持用软件重新连接，请手动重新插拔这块屏") }
-    typealias ConfigureEnabled = @convention(c) (CGDisplayConfigRef, CGDirectDisplayID, Bool) -> Int32
-    let configureEnabled = unsafeBitCast(symbol, to: ConfigureEnabled.self)
     let origins = displays.filter { CGDisplayIsActive($0) != 0 }.map { ($0, CGDisplayBounds($0).origin) }
-    func setEnabled(_ enabled: Bool) -> Bool {
-        var transaction: CGDisplayConfigRef?
-        guard CGBeginDisplayConfiguration(&transaction) == .success, let transaction else { return false }
-        guard configureEnabled(transaction, id, enabled) == 0 else { CGCancelDisplayConfiguration(transaction); return false }
-        return CGCompleteDisplayConfiguration(transaction, .forSession) == .success
-    }
-    guard setEnabled(false) else { fail("系统拒绝断开这块屏，请手动重新插拔") }
+    guard setDisplayEnabled(id, enabled: false) else { fail("系统拒绝断开这块屏，请手动重新插拔") }
     Thread.sleep(forTimeInterval: 0.7)
     var enabled = false
     for _ in 0..<6 {
-        if setEnabled(true) { enabled = true; break }
+        if setDisplayEnabled(id, enabled: true) { enabled = true; break }
         Thread.sleep(forTimeInterval: 0.5)
     }
     guard enabled else { fail("没能自动接回这块屏：请手动重新插拔，或在系统设置 → 显示器里检测显示器") }
@@ -239,6 +244,31 @@ case "reconnect":
     }
     print("已重新连接")
 
+case "disable":
+    let id = display(arguments.dropFirst().first)
+    guard CGDisplayIsActive(id) != 0 else { print("显示器已关闭"); exit(0) }
+    let activeIndependent = onlineDisplays().filter { CGDisplayIsActive($0) != 0 && CGDisplayIsInMirrorSet($0) == 0 }
+    guard activeIndependent.count > 1 else { fail("至少需要保留一块开启的显示器") }
+    guard setDisplayEnabled(id, enabled: false) else { fail("系统拒绝关闭这块显示器") }
+    for _ in 0..<10 where CGDisplayIsActive(id) != 0 { Thread.sleep(forTimeInterval: 0.2) }
+    print("已关闭显示器")
+
+case "enable":
+    guard let text = arguments.dropFirst().first, let id = UInt32(text), id != 0 else { fail("无效的显示器编号") }
+    if onlineDisplays().contains(id) && CGDisplayIsActive(id) != 0 {
+        print("显示器已开启")
+        exit(0)
+    }
+    var ok = false
+    for _ in 0..<6 {
+        if setDisplayEnabled(id, enabled: true) { ok = true; break }
+        Thread.sleep(forTimeInterval: 0.4)
+    }
+    guard ok else { fail("系统拒绝开启这块显示器，请检查线缆或在系统设置里开启") }
+    for _ in 0..<25 where !(onlineDisplays().contains(id) && CGDisplayIsActive(id) != 0) { Thread.sleep(forTimeInterval: 0.2) }
+    guard onlineDisplays().contains(id) && CGDisplayIsActive(id) != 0 else { fail("已发出开启指令，但显示器尚未亮起") }
+    print("已开启显示器")
+
 default:
-    fail("用法：islet-display status|install|remove|reconnect <屏幕 ID>")
+    fail("用法：islet-display status|install|remove|reconnect|enable|disable <屏幕 ID>")
 }

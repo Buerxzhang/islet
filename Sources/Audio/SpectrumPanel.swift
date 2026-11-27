@@ -11,6 +11,7 @@ final class SpectrumPanelModel: ObservableObject {
     @Published var error: String?
     @Published var nowPlaying: NowPlayingInfo?
     @Published var source: SoundSource?
+    @Published var accentTint: NSColor?
 
     var onCommand: (NowPlayingMonitor.Command) -> Void = { _ in }
     var onLook: (SpectrumLook) -> Void = { _ in }
@@ -74,7 +75,7 @@ struct SpectrumPanelView: View {
     /// 主卡片：封面 + 歌曲信息 + 频谱 + 进度 + 控制，底色带一点专辑色。
     private func hero(_ p: Palette) -> some View {
         let info = model.nowPlaying
-        let tint = info?.tint.map(Color.init)
+        let tint = (model.accentTint ?? info?.tint).map(Color.init)
         let accent = tint ?? p.accentFill
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
@@ -168,7 +169,8 @@ struct SpectrumPanelView: View {
 
     /// 其他程序在发声：程序图标 + 名称 + 频谱，点图标切过去。
     private func sourceHero(_ p: Palette, _ source: SoundSource) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let tint = model.accentTint.map(Color.init)
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Button { model.onCommand(.openApp) } label: {
                     Group {
@@ -199,7 +201,14 @@ struct SpectrumPanelView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(p.card)
+        .background(
+            ZStack {
+                p.card
+                if let tint {
+                    LinearGradient(colors: [tint.opacity(0.30), tint.opacity(0.04)], startPoint: .topLeading, endPoint: .bottom)
+                }
+            }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.cardStroke))
     }
@@ -260,7 +269,7 @@ struct SpectrumPanelView: View {
 
     private func barColor(_ p: Palette, index: Int, level: CGFloat) -> Color {
         let base = NSColor(p.text)
-        return Color(nsColor: model.look.color(level: level, album: model.nowPlaying?.tint, base: base))
+        return Color(nsColor: model.look.color(level: level, album: model.accentTint ?? model.nowPlaying?.tint, base: base))
     }
 }
 

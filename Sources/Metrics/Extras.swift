@@ -213,7 +213,7 @@ enum SettingsTransfer {
     static func relaunch() {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; open \"\(Bundle.main.bundlePath)\""]
+        task.arguments = ["-c", "sleep 1; open \"$1\"", "sh", Bundle.main.bundlePath]
         try? task.run()
         NSApp.terminate(nil)
     }
@@ -337,6 +337,7 @@ final class NetworkDetails {
     /// 延迟：到公共 DNS（223.5.5.5:53）建立 TCP 连接的耗时，不需要特殊权限。
     private func measureLatency() {
         let start = Date()
+        let queue = DispatchQueue(label: "local.codex.islet.latency", qos: .utility)
         let connection = NWConnection(host: "223.5.5.5", port: 53, using: .tcp)
         var finished = false
         connection.stateUpdateHandler = { [weak self] state in
@@ -357,8 +358,8 @@ final class NetworkDetails {
             default: break
             }
         }
-        connection.start(queue: .global(qos: .utility))
-        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { if !finished { finished = true; connection.cancel() } }
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + 3) { if !finished { finished = true; connection.cancel() } }
     }
 
     /// 公网 IP：请求 ipify（只返回 IP 本身）。

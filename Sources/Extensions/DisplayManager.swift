@@ -30,6 +30,20 @@ final class DisplayManager: ObservableObject {
             stretched = mode.ioFlags & UInt32(kDisplayModeStretchedFlag) != 0
         }
 
+        static let placeholder = Mode(id: 0, width: 0, height: 0, pixelWidth: 0, pixelHeight: 0, hz: 0, native: false, preferred: false, stretched: false)
+
+        init(id: Int32, width: Int, height: Int, pixelWidth: Int, pixelHeight: Int, hz: Double, native: Bool, preferred: Bool, stretched: Bool) {
+            self.id = id
+            self.width = width
+            self.height = height
+            self.pixelWidth = pixelWidth
+            self.pixelHeight = pixelHeight
+            self.hz = hz
+            self.native = native
+            self.preferred = preferred
+            self.stretched = stretched
+        }
+
         var hiDPI: Bool { pixelWidth >= width * 2 && pixelHeight >= height * 2 }
         var size: String { "\(width)×\(height)" }
         var renderingSize: String { "\(pixelWidth)×\(pixelHeight)" }
@@ -48,6 +62,8 @@ final class DisplayManager: ObservableObject {
         let isMain: Bool
         let mirrored: Bool
         let active: Bool
+        /// 屏幕在桌面坐标系中的位置与逻辑尺寸，用于绘制排列状态。
+        let bounds: CGRect
         /// 屏幕物理宽度（毫米），读不到时为 0。
         let widthMM: Double
 
@@ -177,6 +193,9 @@ final class DisplayManager: ObservableObject {
     private var remembered: [CGDirectDisplayID: (group: String, hz: Double)] = [:]
     /// 记的档位在当前组合下没有、临时改用推荐档位的屏：这时的档位不是用户选的，不记，换回能用的组合时还恢复原来选的
     private var fallback: [CGDirectDisplayID: String] = [:]
+    private var cachedNames: [CGDirectDisplayID: String] = [:]
+    private var cachedBounds: [CGDirectDisplayID: CGRect] = [:]
+    private var disabledDisplays: [CGDirectDisplayID: Display] = [:]
     private var activeSet: Set<CGDirectDisplayID> = []
     private var pendingCheck: DispatchWorkItem?
 
@@ -243,17 +262,31 @@ final class DisplayManager: ObservableObject {
             return (number.uint32Value, screen.localizedName)
         })
         let options = [kCGDisplayShowDuplicateLowResolutionModes as String: true] as CFDictionary
-        displays = ids.prefix(Int(count)).compactMap { id in
-            guard let active = CGDisplayCopyDisplayMode(id) else { return nil }
+        let online: [Display] = ids.prefix(Int(count)).compactMap { id in
+            let active = CGDisplayIsActive(id) != 0
+            let currentMode = CGDisplayCopyDisplayMode(id).map(Mode.init)
+            if active && currentMode == nil { return nil }
+            if let screenName = names[id] { cachedNames[id] = screenName }
+            let rawBounds = CGDisplayBounds(id)
+            if active && rawBounds.width > 0 && rawBounds.height > 0 { cachedBounds[id] = rawBounds }
+            let bounds = (active && rawBounds.width > 0 && rawBounds.height > 0) ? rawBounds : (cachedBounds[id] ?? rawBounds)
             let modes = (CGDisplayCopyAllDisplayModes(id, options) as? [CGDisplayMode] ?? [])
                 .filter { $0.isUsableForDesktopGUI() }.map(Mode.init)
             let native = modes.filter { $0.native && !$0.hiDPI }.max { $0.width * $0.height < $1.width * $1.height }
                 ?? modes.filter { !$0.hiDPI }.max { $0.width * $0.height < $1.width * $1.height }
-            return Display(id: id, name: names[id] ?? "显示器", builtIn: CGDisplayIsBuiltin(id) != 0,
-                           current: Mode(active), modes: modes, native: native,
+            let fallbackMode = currentMode ?? native ?? modes.first ?? .placeholder
+            return Display(id: id, name: names[id] ?? cachedNames[id] ?? "显示器", builtIn: CGDisplayIsBuiltin(id) != 0,
+                           current: fallbackMode, modes: modes, native: native,
                            isMain: CGDisplayIsMain(id) != 0, mirrored: CGDisplayIsInMirrorSet(id) != 0,
-                           active: CGDisplayIsActive(id) != 0, widthMM: Double(CGDisplayScreenSize(id).width))
-        }.sorted { $0.isMain != $1.isMain ? $0.isMain : $0.id < $1.id }
+                           active: active, bounds: bounds, widthMM: Double(CGDisplayScreenSize(id).width))
+        }
+        let onlineIDs = Set(online.map(\.id))
+        for id in onlineIDs { disabledDisplays.removeValue(forKey: id) }
+        displays = (online + disabledDisplays.values.filter { !onlineIDs.contains($0.id) }).sorted {
+            if $0.isMain != $1.isMain { return $0.isMain }
+            if $0.active != $1.active { return $0.active }
+            return $0.id < $1.id
+        }
         // 重连后档位变了（开启的出现了、关闭的消失了），或屏幕拔掉了，就不再等
         let pending = awaitingReconnect.filter { id, adding in displays.contains { $0.id == id && $0.hasHiDPIChoices != adding } }
         if pending != awaitingReconnect { awaitingReconnect = pending }
@@ -263,7 +296,7 @@ final class DisplayManager: ObservableObject {
     /// 读外接屏的覆盖配置状态（辅助程序很快，放后台读）。
     private func refreshOverrides() {
         guard let helper else { return }
-        let ids = displays.filter { !$0.builtIn }.map(\.id)
+        let ids = displays.filter { $0.active && !$0.builtIn }.map(\.id)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var result: [CGDirectDisplayID: OverrideStatus] = [:]
             for id in ids {
@@ -298,6 +331,40 @@ final class DisplayManager: ObservableObject {
     func removeHiDPI(_ display: Display) {
         pendingRecommend = nil
         perform(["remove"], then: ["reconnect"], on: display)
+    }
+
+    /// 开启或关闭显示器；至少保留一块开启的显示器。
+    func setEnabled(_ enabled: Bool, on display: Display) {
+        guard !busy, let helper else { return }
+        if !enabled && displays.filter(\.active).count <= 1 { return }
+        busy = true
+        message = nil
+        let id = String(display.id)
+        let command = enabled ? "enable" : "disable"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let (code, data) = Self.run(helper, [command, id])
+            let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.busy = false
+                if code == 0 {
+                    if enabled {
+                        self.disabledDisplays.removeValue(forKey: display.id)
+                    } else {
+                        self.disabledDisplays[display.id] = Display(
+                            id: display.id, name: display.name, builtIn: display.builtIn,
+                            current: display.current, modes: display.modes, native: display.native,
+                            isMain: false, mirrored: false, active: false,
+                            bounds: display.bounds, widthMM: display.widthMM
+                        )
+                    }
+                    self.message = nil
+                } else {
+                    self.message = text.isEmpty ? nil : text
+                }
+                self.refresh()
+            }
+        }
     }
 
     /// 开启 HiDPI 后等新档位出现，切到推荐大小。重连要一两秒，最多等几秒；要手动插拔的情况就不自动切了。
