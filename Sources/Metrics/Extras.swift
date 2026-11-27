@@ -490,7 +490,7 @@ enum UpdateChecker {
     /// 查询最新版本：成功时回调最新的 Release（可能不比当前新），失败时回调 nil。
     static func fetchLatest(_ completion: @escaping (Release?) -> Void) {
         var request = URLRequest(url: feedURL)
-        request.timeoutInterval = 8
+        request.timeoutInterval = 20
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         URLSession.shared.dataTask(with: request) { data, response, _ in
             var release: Release?
@@ -554,7 +554,7 @@ enum AppInfo {
     /// GitHub 标星数：打开关于页时查一次（公开接口，不需要登录），失败时不显示数字。
     static func fetchStars(_ completion: @escaping (Int?) -> Void) {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/Buerxzhang/islet")!)
-        request.timeoutInterval = 6
+        request.timeoutInterval = 15
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         URLSession.shared.dataTask(with: request) { data, response, _ in
             let stars = (response as? HTTPURLResponse)?.statusCode == 200
